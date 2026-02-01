@@ -1,5 +1,5 @@
 import DatabaseBetter from 'better-sqlite3';
-import type { Workflow, ExecutionTrace, ConversationTree, ModelConfig } from '@convchain/shared';
+import type { Workflow, ExecutionTrace, ConversationTree, ModelConfig } from '@maestroai/shared';
 
 export class Database {
   private db: DatabaseBetter.Database;

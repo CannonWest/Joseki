@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExecutionTrace, ExecutionStatus } from '@convchain/shared';
+import type { ExecutionTrace, ExecutionStatus } from '@maestroai/shared';
 
 interface NodeExecutionState {
   status: ExecutionStatus;

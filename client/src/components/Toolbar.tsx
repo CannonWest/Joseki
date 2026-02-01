@@ -21,7 +21,7 @@ export function Toolbar({
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
       <div className="flex items-center gap-2">
         <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
-        <span className="text-sm text-slate-400">ConvChain Studio</span>
+        <span className="text-sm text-slate-400">MaestroAI</span>
       </div>
 
       <div className="flex-1" />

@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import type { Workflow } from '@convchain/shared';
-import { generateId } from '@convchain/shared';
+import type { Workflow } from '@maestroai/shared';
+import { generateId } from '@maestroai/shared';
 import { Database } from '../db/database';
 
 const router = Router();

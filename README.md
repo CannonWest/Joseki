@@ -1,4 +1,4 @@
-# ConvChain Studio
+# MaestroAI
 
 A visual IDE for building conversational AI workflows with tree-based branching and multi-model evaluation.
 
@@ -21,8 +21,8 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 
 ```bash
 # Clone the repository
-git clone https://github.com/[your-username]/convchain-studio.git
-cd convchain-studio
+git clone https://github.com/[your-username]/maestroai.git
+cd maestroai
 
 # Install dependencies
 npm install
@@ -45,7 +45,7 @@ The app will be available at:
 ## Project Structure
 
 ```
-convchain-studio/
+maestroai/
 ├── client/          # React frontend (Vite + TypeScript + Tailwind)
 ├── server/          # Node.js backend (Express + Socket.io)
 ├── shared/          # Shared types and utilities
@@ -64,7 +64,7 @@ convchain-studio/
 
 ## Stepflow Integration
 
-ConvChain Studio generates workflows compatible with the [Stepflow](https://stepflow.org) protocol.
+MaestroAI generates workflows compatible with the [Stepflow](https://stepflow.org) protocol.
 
 ### Export to Stepflow
 
@@ -126,7 +126,7 @@ POST /api/workflows/:id/stepflow/run
 
 ## Architecture
 
-ConvChain Studio consists of three main components:
+MaestroAI consists of three main components:
 
 1. **Visual Editor** (`client/`): React-based node editor built with React Flow
 2. **Execution Engine** (`server/`): Node.js backend for workflow execution
@@ -167,7 +167,7 @@ See [NOTICE](NOTICE) file for complete attribution.
 
 ## Links
 
-- **ConvChain Studio**: [GitHub Repository](https://github.com/[your-username]/convchain-studio)
+- **MaestroAI**: [GitHub Repository](https://github.com/[your-username]/maestroai)
 - **Stepflow**: [Website](https://stepflow.org) | [GitHub](https://github.com/stepflow-ai/stepflow)
 - **Documentation**: [Stepflow Docs](https://stepflow.org/docs)
 

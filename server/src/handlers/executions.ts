@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateId } from '@convchain/shared';
+import { generateId } from '@maestroai/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
 

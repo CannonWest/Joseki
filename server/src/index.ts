@@ -35,7 +35,7 @@ const io = new Server(httpServer, {
 });
 
 // Initialize database
-const db = new Database(process.env.DATABASE_PATH || './data/convchain.db');
+const db = new Database(process.env.DATABASE_PATH || './data/maestroai.db');
 
 // Middleware
 app.use(cors());
@@ -62,7 +62,7 @@ setupSocketHandlers(io, db);
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`ConvChain Studio server running on port ${PORT}`);
+  console.log(`MaestroAI server running on port ${PORT}`);
 });
 
 export { db, io };

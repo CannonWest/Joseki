@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useWorkflowStore } from '../stores/workflowStore';
-import type { Workflow, WorkflowEdge } from '@convchain/shared';
+import type { Workflow, WorkflowEdge } from '@maestroai/shared';
 
 // Inline Stepflow conversion utilities to avoid build issues
 // These are simplified versions from shared/src/stepflow.ts
@@ -71,7 +71,7 @@ function convertToStepflow(workflow: Workflow): StepflowWorkflow {
   return {
     schema: 'https://stepflow.org/schemas/v1/flow.json',
     name: workflow.name,
-    description: `Generated from ConvChain Studio: ${workflow.name}`,
+    description: `Generated from MaestroAI: ${workflow.name}`,
     steps
   };
 }
@@ -780,7 +780,7 @@ steps:
         {/* Footer */}
         <div className="p-4 border-t border-slate-700 bg-slate-900/50">
           <p className="text-xs text-slate-500 text-center">
-            ConvChain Studio generates workflows compatible with{' '}
+            MaestroAI generates workflows compatible with{' '}
             <a 
               href="https://stepflow.org" 
               target="_blank" 

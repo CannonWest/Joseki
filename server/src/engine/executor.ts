@@ -1,5 +1,5 @@
-import type { Workflow, WorkflowNode, ExecutionContext, ExecutionTrace, NodeType } from '@convchain/shared';
-import { generateId, calculateCost } from '@convchain/shared';
+import type { Workflow, WorkflowNode, ExecutionContext, ExecutionTrace, NodeType } from '@maestroai/shared';
+import { generateId, calculateCost } from '@maestroai/shared';
 import Handlebars from 'handlebars';
 import { LLMAdapter } from '../adapters/llm';
 import { Database } from '../db/database';

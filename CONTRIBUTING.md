@@ -1,6 +1,6 @@
-# Contributing to ConvChain Studio
+# Contributing to MaestroAI
 
-Thank you for your interest in contributing to ConvChain Studio! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to MaestroAI! This document provides guidelines for contributing to the project.
 
 ## Code of Conduct
 

@@ -510,7 +510,7 @@ function App() {
     return (
       <div className="h-screen w-full bg-slate-950 flex items-center justify-center">
         <div className="max-w-2xl w-full mx-4">
-          <h1 className="text-4xl font-bold text-white mb-2">ConvChain Studio</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">MaestroAI</h1>
           <p className="text-slate-400 mb-8">Visual IDE for conversational AI workflows</p>
           
           <div className="grid grid-cols-2 gap-4 mb-8">

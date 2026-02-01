@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Workflow, WorkflowNode, WorkflowEdge } from '@convchain/shared';
+import type { Workflow, WorkflowNode, WorkflowEdge } from '@maestroai/shared';
 
 interface WorkflowState {
   workflows: Workflow[];

@@ -22,7 +22,7 @@ import {
   toStepflowJSON,
   validateForStepflow,
   StepflowWorkflow
-} from '@convchain/shared';
+} from '@maestroai/shared';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -177,7 +177,7 @@ router.post('/workflows/:id/stepflow/validate', (req, res) => {
 
 /**
  * POST /api/stepflow/import
- * Import a Stepflow workflow into ConvChain Studio
+ * Import a Stepflow workflow into MaestroAI
  */
 router.post('/stepflow/import', async (req, res) => {
   try {
@@ -191,7 +191,7 @@ router.post('/stepflow/import', async (req, res) => {
       });
     }
     
-    // Convert to ConvChain format
+    // Convert to MaestroAI format
     const partialWorkflow = convertFromStepflow(stepflowWorkflow);
     
     // Create full workflow with generated ID
@@ -232,7 +232,7 @@ router.post('/stepflow/import-yaml', async (req, res) => {
     // Parse YAML (simple parser - in production use a proper YAML library)
     const workflow = parseStepflowYAML(yamlContent);
     
-    // Convert to ConvChain format
+    // Convert to MaestroAI format
     const partialWorkflow = convertFromStepflow(workflow);
     
     const now = Date.now();
@@ -288,7 +288,7 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
   }
   
   const executionId = `exec-${Date.now()}`;
-  const tempDir = join(tmpdir(), 'convchain-stepflow');
+  const tempDir = join(tmpdir(), 'maestroai-stepflow');
   const workflowPath = join(tempDir, `${executionId}.yaml`);
   const inputPath = join(tempDir, `${executionId}-input.json`);
   

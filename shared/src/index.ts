@@ -1,4 +1,4 @@
-// Shared types and utilities for ConvChain Studio
+// Shared types and utilities for MaestroAI
 
 // Export Stepflow compatibility layer
 export * from './stepflow';

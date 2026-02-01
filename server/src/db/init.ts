@@ -1,7 +1,7 @@
 import { Database } from './database';
 import path from 'path';
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/convchain.db');
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/maestroai.db');
 
 console.log('Initializing database at:', dbPath);
 
