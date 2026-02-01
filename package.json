@@ -1,0 +1,26 @@
+{
+  "name": "convchain-studio",
+  "version": "1.0.0",
+  "description": "Visual IDE for conversational AI workflows with tree-based branching",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "npm run build:shared && npm run build:client && npm run build:server",
+    "build:client": "cd client && npm run build",
+    "build:server": "cd server && npm run build",
+    "build:shared": "cd shared && npm run build",
+    "db:init": "cd server && npm run db:init",
+    "db:migrate": "cd server && npm run db:migrate",
+    "install:all": "npm install && cd shared && npm install && cd ../server && npm install && cd ../client && npm install",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.3"
+  }
+}

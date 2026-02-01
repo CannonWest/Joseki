@@ -1,0 +1,35 @@
+ConvChain Studio
+Copyright 2025 [Your Name or Organization]
+
+This product includes software developed by:
+
+Stepflow
+Copyright 2025 DataStax Inc.
+
+Stepflow is an open-source protocol and runtime for GenAI workflows,
+licensed under the Apache License 2.0.
+
+This application generates workflow configurations compatible with
+the Stepflow protocol. For more information about Stepflow, visit:
+https://stepflow.org
+
+The Stepflow source code is available at:
+https://github.com/stepflow-ai/stepflow
+
+==============================================================================
+
+THIRD-PARTY DEPENDENCIES
+
+This project uses the following open source packages:
+
+- React - MIT License (c) Meta Platforms, Inc.
+- React Flow - MIT License (c) FlowiseAI Inc.
+- Express - MIT License (c) TJ Holowaychuk
+- Socket.io - MIT License (c) Automattic
+- Zustand - MIT License (c) Paul Henschel
+- Tailwind CSS - MIT License (c) Tailwind Labs, Inc.
+- Vite - MIT License (c) 2019-present, Yuxi (Evan) You and Vite contributors
+- better-sqlite3 - MIT License (c) 2017 Joshua Wise
+
+For complete license texts of all dependencies, see their respective
+repositories or the node_modules/ directory after installation.
