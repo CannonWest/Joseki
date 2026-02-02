@@ -548,7 +548,13 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   };
 
   return (
-    <div className="w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col overflow-hidden">
+    <div 
+      className="w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col overflow-hidden"
+      onKeyDown={(e) => {
+        // Prevent spacebar and other keys from bubbling to React Flow's canvas pan handlers
+        e.stopPropagation();
+      }}
+    >
       <div className="h-12 border-b border-slate-800 flex items-center justify-between px-4">
         <h3 className="font-semibold text-slate-200">Node Configuration</h3>
         <button
