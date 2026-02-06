@@ -27,9 +27,11 @@ import {
   validateStepflowImport,
   checkCompatibility,
   generateStepflowConfig,
+  generateFullStepflowConfig,
   toFlowBuilderPython,
   generateBatchSchema,
-  StepflowWorkflow
+  StepflowWorkflow,
+  MCPServerConfig
 } from '@maestroai/shared';
 
 const router = Router();
@@ -521,6 +523,104 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
     
     res.status(500).json({
       error: 'Failed to run workflow',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * POST /api/workflows/:id/stepflow/full-config
+ * Generate full stepflow-config.yml with MCP support
+ */
+router.post('/workflows/:id/stepflow/full-config', (req, res) => {
+  const db = (req as any).db as Database;
+  const workflow = db.getWorkflow(req.params.id);
+  
+  if (!workflow) {
+    return res.status(404).json({ error: 'Workflow not found' });
+  }
+  
+  try {
+    const mcpServers: MCPServerConfig[] = req.body.mcpServers || [];
+    const config = generateFullStepflowConfig(workflow, mcpServers);
+    
+    res.setHeader('Content-Type', 'text/yaml');
+    res.setHeader('Content-Disposition', `attachment; filename="stepflow-config.yaml"`);
+    res.send(config);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to generate full configuration',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * POST /api/stepflow/validate-expression
+ * Validate a Stepflow value expression
+ */
+router.post('/stepflow/validate-expression', (req, res) => {
+  try {
+    const { expression, availableSteps, availableVariables } = req.body;
+    
+    if (!expression) {
+      return res.status(400).json({ error: 'Expression is required' });
+    }
+    
+    // Import and use the validation function
+    const { validateExpression } = require('@maestroai/shared');
+    const result = validateExpression(
+      expression,
+      availableSteps || [],
+      availableVariables || []
+    );
+    
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to validate expression',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * GET /api/stepflow/components
+ * Get available Stepflow components
+ */
+router.get('/stepflow/components', (req, res) => {
+  try {
+    const { category, search, includeBuiltin } = req.query;
+    
+    const { componentRegistry } = require('@maestroai/shared');
+    const components = componentRegistry.getComponents({
+      category: category as any,
+      search: search as string,
+      includeBuiltin: includeBuiltin !== 'false'
+    });
+    
+    res.json({ components });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to get components',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * GET /api/stepflow/components/:path/documentation
+ * Get component documentation
+ */
+router.get('/stepflow/components/:path/documentation', (req, res) => {
+  try {
+    const { getComponentDocumentation } = require('@maestroai/shared');
+    const doc = getComponentDocumentation('/' + req.params.path);
+    
+    res.json({ documentation: doc });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to get documentation',
       message: error instanceof Error ? error.message : String(error)
     });
   }

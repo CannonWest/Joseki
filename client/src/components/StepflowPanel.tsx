@@ -8,9 +8,11 @@
  * - Validating workflows
  * - Running with Stepflow CLI
  * - Batch execution schema
+ * - Component discovery and MCP management
+ * - Expression validation
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWorkflowStore } from '../stores/workflowStore';
 import type { Workflow } from '@maestroai/shared';
 import {
@@ -19,9 +21,19 @@ import {
   toStepflowJSON,
   toFlowBuilderPython,
   generateStepflowConfig,
+  generateFullStepflowConfig,
   generateBatchSchema,
   validateForStepflow,
-  type StepflowWorkflow
+  validateExpression,
+  createEmptyContext,
+  extractStepReferences,
+  type StepflowWorkflow,
+  type MCPServerConfig,
+  componentRegistry,
+  getRequiredEnvVars,
+  validateComponentPath,
+  getComponentDocumentation,
+  BUILTIN_COMPONENTS
 } from '@maestroai/shared';
 
 interface StepflowStatus {
@@ -52,8 +64,8 @@ interface PreviewResult {
   canRunWithStepflow: boolean;
 }
 
-type ExportFormat = 'yaml' | 'json' | 'python' | 'config';
-type ActiveTab = 'export' | 'import' | 'validate' | 'run' | 'batch';
+type ExportFormat = 'yaml' | 'json' | 'python' | 'config' | 'full-config';
+type ActiveTab = 'export' | 'import' | 'validate' | 'run' | 'batch' | 'components' | 'expressions';
 
 export function StepflowPanel({ onClose }: { onClose: () => void }) {
   const { currentWorkflow } = useWorkflowStore();
@@ -69,6 +81,25 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
   const [isSaved, setIsSaved] = useState<boolean | null>(null);
   const [batchSchema, setBatchSchema] = useState<any>(null);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('yaml');
+  
+  // Component discovery state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedComponent, setSelectedComponent] = useState<string | null>(null);
+  const [componentDoc, setComponentDoc] = useState<string>('');
+  
+  // Expression validation state
+  const [expressionInput, setExpressionInput] = useState('');
+  const [expressionResult, setExpressionResult] = useState<any>(null);
+  const [expressionError, setExpressionError] = useState<string | null>(null);
+  
+  // MCP state
+  const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
+  const [showMCPForm, setShowMCPForm] = useState(false);
+  const [newMCP, setNewMCP] = useState<Partial<MCPServerConfig>>({
+    type: 'stdio',
+    autoConnect: true
+  });
 
   // Fetch Stepflow CLI status and check if workflow is saved on mount
   useEffect(() => {
@@ -105,6 +136,13 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
       loadBatchSchema();
     }
   }, [currentWorkflow, activeTab]);
+
+  // Load component documentation when component selected
+  useEffect(() => {
+    if (selectedComponent) {
+      setComponentDoc(getComponentDocumentation(selectedComponent));
+    }
+  }, [selectedComponent]);
 
   const validateWorkflow = useCallback(async () => {
     if (!currentWorkflow) return;
@@ -315,6 +353,13 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
           filename = 'stepflow-config.yaml';
           mimeType = 'text/yaml';
           break;
+        case 'full-config':
+          content = generateFullStepflowConfig(currentWorkflow, mcpServers);
+          filename = 'stepflow-config.yaml';
+          mimeType = 'text/yaml';
+          break;
+        default:
+          return;
       }
       
       downloadClientSide(content, filename, mimeType);
@@ -335,8 +380,11 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
         endpoint = 'python';
         break;
       case 'config':
+      case 'full-config':
         endpoint = 'config';
         break;
+      default:
+        return;
     }
     
     window.open(`/api/workflows/${currentWorkflow.id}/stepflow/${endpoint}`, '_blank');
@@ -404,6 +452,56 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleValidateExpression = () => {
+    setExpressionError(null);
+    setExpressionResult(null);
+    
+    if (!expressionInput.trim()) {
+      setExpressionError('Please enter an expression');
+      return;
+    }
+    
+    try {
+      // Parse the expression as JSON
+      const expr = JSON.parse(expressionInput);
+      
+      // Get available steps from current workflow
+      const availableSteps = currentWorkflow?.nodes.map(n => n.id) || [];
+      
+      // Validate
+      const result = validateExpression(expr, availableSteps, []);
+      setExpressionResult(result);
+    } catch (err) {
+      setExpressionError('Invalid JSON expression');
+    }
+  };
+
+  const handleAddMCPServer = () => {
+    if (!newMCP.id || !newMCP.command) {
+      setError('MCP server ID and command are required');
+      return;
+    }
+    
+    const server: MCPServerConfig = {
+      id: newMCP.id,
+      type: newMCP.type || 'stdio',
+      name: newMCP.name || newMCP.id,
+      command: newMCP.command,
+      args: newMCP.args || [],
+      env: newMCP.env || {},
+      autoConnect: newMCP.autoConnect ?? true
+    };
+    
+    setMcpServers([...mcpServers, server]);
+    setShowMCPForm(false);
+    setNewMCP({ type: 'stdio', autoConnect: true });
+    setSuccess(`MCP server "${server.name}" added`);
+  };
+
+  const handleRemoveMCPServer = (id: string) => {
+    setMcpServers(mcpServers.filter(s => s.id !== id));
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setSuccess('Copied to clipboard!');
@@ -435,6 +533,8 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
           return toFlowBuilderPython(currentWorkflow);
         case 'config':
           return generateStepflowConfig(currentWorkflow);
+        case 'full-config':
+          return generateFullStepflowConfig(currentWorkflow, mcpServers);
         default:
           return '';
       }
@@ -443,9 +543,30 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const getFilteredComponents = () => {
+    const components = componentRegistry.getComponents({ includeBuiltin: true });
+    
+    return components.filter(c => {
+      if (selectedCategory !== 'all' && c.category !== selectedCategory) {
+        return false;
+      }
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          c.name.toLowerCase().includes(query) ||
+          c.description?.toLowerCase().includes(query) ||
+          c.path.toLowerCase().includes(query)
+        );
+      }
+      return true;
+    });
+  };
+
+  const categories = ['all', 'llm', 'tool', 'data', 'control', 'utility', 'integration', 'custom'];
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg w-[900px] max-h-[85vh] flex flex-col">
+      <div className="bg-slate-900 border border-slate-700 rounded-lg w-[1000px] max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-700">
           <div className="flex items-center gap-3">
@@ -470,18 +591,18 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-slate-700">
-          {(['export', 'import', 'validate', 'run', 'batch'] as const).map(tab => (
+        <div className="flex border-b border-slate-700 overflow-x-auto">
+          {(['export', 'import', 'validate', 'run', 'batch', 'components', 'expressions'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-3 text-sm font-medium transition-colors ${
+              className={`px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-500/10'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'full-config' ? 'Full Config' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -514,8 +635,8 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
               )}
               
               {/* Format Selector */}
-              <div className="flex gap-2 mb-4">
-                {(['yaml', 'json', 'python', 'config'] as ExportFormat[]).map(format => (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {(['yaml', 'json', 'python', 'config', 'full-config'] as ExportFormat[]).map(format => (
                   <button
                     key={format}
                     onClick={() => setExportFormat(format)}
@@ -525,7 +646,7 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    {format === 'config' ? 'Config' : format.toUpperCase()}
+                    {format === 'full-config' ? 'Full Config' : format === 'config' ? 'Config' : format.toUpperCase()}
                   </button>
                 ))}
               </div>
@@ -536,7 +657,7 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
                   disabled={!currentWorkflow || isLoading}
                   className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
                 >
-                  Download {exportFormat === 'config' ? 'Config' : exportFormat.toUpperCase()}
+                  Download {exportFormat === 'full-config' ? 'Full Config' : exportFormat === 'config' ? 'Config' : exportFormat.toUpperCase()}
                 </button>
               </div>
               
@@ -565,6 +686,12 @@ export function StepflowPanel({ onClose }: { onClose: () => void }) {
                     <>
                       <strong className="text-slate-300">Config:</strong> stepflow-config.yml with plugin routing.
                       Required for workflows using Anthropic, Cohere, or custom plugins.
+                    </>
+                  )}
+                  {exportFormat === 'full-config' && (
+                    <>
+                      <strong className="text-slate-300">Full Config:</strong> Configuration including MCP servers.
+                      Complete setup for running with external tools and integrations.
                     </>
                   )}
                 </p>
@@ -849,6 +976,243 @@ steps:
               )}
             </div>
           )}
+
+          {/* Components Tab */}
+          {activeTab === 'components' && (
+            <div className="space-y-4">
+              {/* Search and Filter */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search components..."
+                  className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-blue-500"
+                >
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>
+                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Component List */}
+              <div className="grid grid-cols-2 gap-3 max-h-[300px] overflow-auto">
+                {getFilteredComponents().map(component => (
+                  <button
+                    key={component.path}
+                    onClick={() => setSelectedComponent(component.path)}
+                    className={`p-3 text-left rounded-lg border transition-colors ${
+                      selectedComponent === component.path
+                        ? 'bg-blue-500/20 border-blue-500/50'
+                        : 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-300">{component.name}</span>
+                      <span className="text-xs text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded">
+                        {component.category}
+                      </span>
+                    </div>
+                    <code className="text-xs text-slate-400 block truncate">{component.path}</code>
+                  </button>
+                ))}
+              </div>
+
+              {/* Component Documentation */}
+              {selectedComponent && componentDoc && (
+                <div className="border border-slate-700 rounded-lg">
+                  <div className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-800/50">
+                    <h3 className="text-sm font-medium text-slate-300">Documentation</h3>
+                    <button
+                      onClick={() => copyToClipboard(componentDoc)}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <div className="p-3 max-h-[250px] overflow-auto">
+                    <pre className="text-xs text-slate-300 whitespace-pre-wrap">
+                      {componentDoc}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* MCP Servers Section */}
+              <div className="border-t border-slate-700 pt-4 mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-slate-300">MCP Servers</h3>
+                  <button
+                    onClick={() => setShowMCPForm(!showMCPForm)}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    {showMCPForm ? 'Cancel' : '+ Add Server'}
+                  </button>
+                </div>
+
+                {showMCPForm && (
+                  <div className="p-3 bg-slate-800/50 rounded-lg space-y-3 mb-3">
+                    <input
+                      type="text"
+                      placeholder="Server ID"
+                      value={newMCP.id || ''}
+                      onChange={(e) => setNewMCP({ ...newMCP, id: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Display name"
+                      value={newMCP.name || ''}
+                      onChange={(e) => setNewMCP({ ...newMCP, name: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Command (e.g., npx)"
+                      value={newMCP.command || ''}
+                      onChange={(e) => setNewMCP({ ...newMCP, command: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Arguments (comma-separated)"
+                      onChange={(e) => setNewMCP({ 
+                        ...newMCP, 
+                        args: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                      })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={handleAddMCPServer}
+                      className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium"
+                    >
+                      Add Server
+                    </button>
+                  </div>
+                )}
+
+                {mcpServers.length === 0 ? (
+                  <p className="text-sm text-slate-500">No MCP servers configured</p>
+                ) : (
+                  <div className="space-y-2">
+                    {mcpServers.map(server => (
+                      <div
+                        key={server.id}
+                        className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg"
+                      >
+                        <div>
+                          <span className="text-sm text-slate-300">{server.name}</span>
+                          <code className="text-xs text-slate-500 block">{server.command}</code>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveMCPServer(server.id)}
+                          className="text-xs text-red-400 hover:text-red-300"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Expressions Tab */}
+          {activeTab === 'expressions' && (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-sm text-blue-400 font-medium mb-1">Expression Validator</p>
+                <p className="text-xs text-slate-400">
+                  Validate Stepflow value expressions ($step, $input, $variable, etc.)
+                  against your workflow's steps.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">Expression (JSON)</label>
+                <textarea
+                  value={expressionInput}
+                  onChange={(e) => setExpressionInput(e.target.value)}
+                  placeholder={`{\n  "$step": "step_1",\n  "path": "$.output.text"\n}`}
+                  className="w-full h-32 p-3 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 font-mono resize-none focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <button
+                onClick={handleValidateExpression}
+                disabled={!expressionInput.trim()}
+                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Validate Expression
+              </button>
+
+              {expressionError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg">
+                  <p className="text-sm text-red-400">{expressionError}</p>
+                </div>
+              )}
+
+              {expressionResult && (
+                <div className={`p-3 rounded-lg ${
+                  expressionResult.valid
+                    ? 'bg-green-500/20 border border-green-500/50'
+                    : 'bg-yellow-500/20 border border-yellow-500/50'
+                }`}>
+                  <p className={`text-sm font-medium ${
+                    expressionResult.valid ? 'text-green-400' : 'text-yellow-400'
+                  }`}>
+                    {expressionResult.valid ? '✓ Valid Expression' : '⚠ Expression Issues'}
+                  </p>
+                  {expressionResult.errors?.length > 0 && (
+                    <ul className="mt-2 text-sm text-yellow-400/80 space-y-1">
+                      {expressionResult.errors.map((err: string, i: number) => (
+                        <li key={i}>• {err}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* Expression Reference */}
+              <div className="border-t border-slate-700 pt-4">
+                <h3 className="text-sm font-medium text-slate-300 mb-3">Expression Reference</h3>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$step": "step_id" }`}</code>
+                    <span className="text-slate-400 ml-2">Reference step output</span>
+                  </div>
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$step": "step_id", "path": "$.field" }`}</code>
+                    <span className="text-slate-400 ml-2">Reference with JSONPath</span>
+                  </div>
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$input": "fieldName" }`}</code>
+                    <span className="text-slate-400 ml-2">Reference workflow input</span>
+                  </div>
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$variable": "varName", "default": "fallback" }`}</code>
+                    <span className="text-slate-400 ml-2">Reference variable with default</span>
+                  </div>
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$template": "Hello {{$step.step_1}}" }`}</code>
+                    <span className="text-slate-400 ml-2">Template string</span>
+                  </div>
+                  <div className="p-2 bg-slate-800/50 rounded">
+                    <code className="text-blue-400">{`{ "$literal": { "$not": "reference" } }`}</code>
+                    <span className="text-slate-400 ml-2">Literal value escape</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -864,6 +1228,7 @@ steps:
               Stepflow
             </a>
             {' '}— an open protocol for GenAI workflows
+            {mcpServers.length > 0 && ' • MCP servers configured'}
           </p>
         </div>
       </div>

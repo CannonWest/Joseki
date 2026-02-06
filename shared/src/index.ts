@@ -3,6 +3,8 @@
 // Export Stepflow compatibility layer
 export * from './stepflow';
 export * from './stepflowSchema';
+export * from './stepflowExpressions';
+export * from './stepflowDiscovery';
 
 // Re-export specific types for convenience
 export type {
@@ -25,6 +27,28 @@ export type {
   ValidatedStepflowErrorHandler,
   ValidationResult
 } from './stepflowSchema';
+
+// Export expression types
+export type {
+  StepReference,
+  InputReference,
+  VariableReference,
+  TemplateExpression,
+  LiteralExpression,
+  FromReference,
+  StepflowExpression,
+  EvaluationContext
+} from './stepflowExpressions';
+
+// Export discovery types
+export type {
+  ComponentInfo,
+  ComponentExample,
+  PluginInfo,
+  MCPServerConfig,
+  DiscoveryOptions,
+  ComponentCategory
+} from './stepflowDiscovery';
 
 // ==================== Workflow Types ====================
 
