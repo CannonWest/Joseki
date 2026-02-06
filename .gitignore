@@ -44,4 +44,3 @@ coverage/
 .cache/
 temp/
 tmp/
-client/package-lock.json
