@@ -1,8 +1,12 @@
 import type { Workflow, WorkflowNode, ExecutionContext, ExecutionTrace, NodeType } from '@maestroai/shared';
 import { generateId, calculateCost } from '@maestroai/shared';
 import Handlebars from 'handlebars';
+import { Parser as ExprParser } from 'expr-eval';
 import { LLMAdapter } from '../adapters/llm';
 import { Database } from '../db/database';
+
+// Create a single parser instance for safe branch condition evaluation
+const safeExprParser = new ExprParser();
 
 export interface ExecutionOptions {
   startNodeId?: string;
@@ -224,12 +228,35 @@ export class WorkflowExecutor {
     context: ExecutionContext
   ): Promise<string> {
     const config = node.data.config as any;
-    
-    // Evaluate condition with context
-    const conditionFn = new Function('context', `return ${config.condition}`);
-    const result = conditionFn(context);
-    
-    return String(result);
+    const conditionStr: string = config.condition || 'true';
+
+    // Build a flat evaluation scope from the execution context.
+    // This gives expressions access to node outputs without arbitrary code execution.
+    const scope: Record<string, any> = {};
+
+    for (const [nodeId, nodeCtx] of Object.entries(context)) {
+      const output = nodeCtx.output;
+      scope[nodeId] = typeof output === 'string' ? output : JSON.stringify(output);
+      scope[`${nodeId}_output`] = output;
+    }
+
+    // Expose a simple "input" key pointing to the first upstream output
+    const firstInput = Object.values(context)[0]?.output;
+    if (firstInput !== undefined) {
+      scope['input'] = typeof firstInput === 'string' ? firstInput : JSON.stringify(firstInput);
+    }
+
+    try {
+      const expr = safeExprParser.parse(conditionStr);
+      const result = expr.evaluate(scope);
+      return String(result);
+    } catch (exprErr) {
+      throw new Error(
+        `Branch condition "${conditionStr}" could not be evaluated safely: ` +
+        `${exprErr instanceof Error ? exprErr.message : String(exprErr)}. ` +
+        `Use simple expressions like: input == "yes", score > 0.5, nodeId_output == "approved"`
+      );
+    }
   }
 
   private async executeAggregateNode(

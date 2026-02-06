@@ -166,6 +166,44 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
               />
             </div>
 
+            {/* Error Handling */}
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                On Error
+              </label>
+              <select
+                value={config.onError?.strategy || 'fail'}
+                onChange={(e) => setConfig({
+                  ...config,
+                  onError: { ...config.onError, strategy: e.target.value }
+                })}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+              >
+                <option value="fail">Fail (stop workflow)</option>
+                <option value="retry">Retry (with backoff)</option>
+                <option value="default">Default (use fallback value)</option>
+              </select>
+            </div>
+
+            {config.onError?.strategy === 'retry' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Max Retry Attempts
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={config.onError?.maxAttempts || 3}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    onError: { ...config.onError, maxAttempts: parseInt(e.target.value) }
+                  })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+                />
+              </div>
+            )}
+
             {/* Available Inputs Section */}
             {getAvailableInputs.length > 0 && (
               <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
@@ -243,13 +281,13 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">
-                Condition (JavaScript)
+                Condition Expression
               </label>
               <div className="h-40 border border-slate-700 rounded overflow-hidden">
                 <Editor
                   height="100%"
-                  defaultLanguage="javascript"
-                  value={config.condition || 'context.input.includes("yes")'}
+                  defaultLanguage="plaintext"
+                  value={config.condition || 'input == "yes"'}
                   onChange={(v) => setConfig({ ...config, condition: v })}
                   theme="vs-dark"
                   options={{
@@ -261,7 +299,10 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                 />
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Return true/false or a branch ID string
+                Safe expressions only. Available variables: upstream node IDs
+                and <code className="text-slate-400">input</code>.
+                Examples: <code className="text-slate-400">input == "yes"</code>,
+                <code className="text-slate-400"> score {'>'} 0.5</code>
               </p>
             </div>
           </div>
