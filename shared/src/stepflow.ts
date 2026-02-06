@@ -37,8 +37,15 @@ export interface StepflowWorkflow {
   schema: 'https://stepflow.org/schemas/v1/flow.json';
   name: string;
   description?: string;
+  // Stepflow canonical format
+  schemas?: {
+    input?: StepflowInputSchema;
+  };
+  // Legacy MaestroAI format (kept for backward compatibility on import)
   input_schema?: StepflowInputSchema;
   steps: StepflowStep[];
+  // Flow-level output referencing terminal step(s)
+  output?: StepflowInputValue;
 }
 
 export interface StepflowInputSchema {
@@ -80,7 +87,12 @@ export interface StepflowFromReference {
 }
 
 export interface StepflowErrorHandler {
-  action: 'retry' | 'skip' | 'fail';
+  // Stepflow native format
+  type?: 'retry' | 'default' | 'fail';
+  max_attempts?: number;
+  value?: any;
+  // Legacy MaestroAI export format
+  action?: 'retry' | 'skip' | 'fail';
   max_retries?: number;
 }
 
@@ -100,16 +112,42 @@ const STEPFLOW_COMPONENT_MAP: Record<NodeType, string> = {
 };
 
 /**
- * Model ID mapping to Stepflow component paths
+ * Maps model IDs to Stepflow component paths via prefix matching.
+ * New model variants (e.g. gpt-4o-mini) resolve automatically to the
+ * correct provider component without requiring explicit entries.
  */
-const STEPFLOW_MODEL_COMPONENTS: Record<string, string> = {
-  'gpt-4': '/builtin/openai',
-  'gpt-4-turbo': '/builtin/openai',
-  'gpt-3.5-turbo': '/builtin/openai',
-  'claude-3-opus': '/stepflow-anthropic/anthropic',
-  'claude-3-sonnet': '/stepflow-anthropic/anthropic',
-  'claude-3-haiku': '/stepflow-anthropic/anthropic'
-};
+const MODEL_PROVIDER_PREFIXES: Array<{ prefix: string; component: string }> = [
+  // OpenAI family
+  { prefix: 'gpt-',          component: '/builtin/openai' },
+  { prefix: 'o1-',           component: '/builtin/openai' },
+  { prefix: 'o3-',           component: '/builtin/openai' },
+  // Anthropic family
+  { prefix: 'claude-',       component: '/stepflow-anthropic/anthropic' },
+  // Cohere family
+  { prefix: 'command-',      component: '/stepflow-cohere/cohere' },
+  { prefix: 'c4ai-',         component: '/stepflow-cohere/cohere' },
+  // Local / self-hosted (e.g. ollama, vLLM)
+  { prefix: 'local/',        component: '/python/local_llm' },
+  { prefix: 'ollama/',       component: '/python/local_llm' },
+];
+
+/**
+ * Resolve a model ID to its Stepflow component path.
+ * Falls back to /builtin/openai for unknown models (many providers
+ * expose an OpenAI-compatible API).
+ */
+export function resolveModelComponent(modelId: string): string {
+  const match = MODEL_PROVIDER_PREFIXES.find(({ prefix }) =>
+    modelId.toLowerCase().startsWith(prefix)
+  );
+  if (match) return match.component;
+
+  console.warn(
+    `[Stepflow] Unknown model "${modelId}", defaulting to /builtin/openai. ` +
+    `Add a prefix mapping in MODEL_PROVIDER_PREFIXES for accurate routing.`
+  );
+  return '/builtin/openai';
+}
 
 // ==================== Conversion Functions ====================
 
@@ -170,14 +208,39 @@ export function convertToStepflow(workflow: Workflow): StepflowWorkflow {
   for (const node of workflow.nodes) {
     processNode(node);
   }
-  
-  return {
+
+  // Find output nodes (nodes with no outgoing edges or explicit output type)
+  const outgoingNodeIds = new Set(workflow.edges.map(e => e.source));
+  const outputNodes = workflow.nodes.filter(
+    n => !outgoingNodeIds.has(n.id) || n.type === 'output'
+  );
+
+  const result: any = {
     schema: 'https://stepflow.org/schemas/v1/flow.json',
     name: workflow.name,
     description: `Generated from MaestroAI workflow: ${workflow.name}`,
-    input_schema: generateInputSchema(inputNodes),
     steps
   };
+
+  // Use Stepflow's canonical schemas.input (not input_schema)
+  if (inputNodes.length > 0) {
+    result.schemas = {
+      input: generateInputSchema(inputNodes)
+    };
+  }
+
+  // Add flow-level output referencing the terminal step(s)
+  if (outputNodes.length === 1) {
+    result.output = { $step: sanitizeId(outputNodes[0].id) };
+  } else if (outputNodes.length > 1) {
+    const outputObj: Record<string, any> = {};
+    for (const node of outputNodes) {
+      outputObj[sanitizeId(node.id)] = { $step: sanitizeId(node.id) };
+    }
+    result.output = outputObj;
+  }
+
+  return result as StepflowWorkflow;
 }
 
 /**
@@ -247,13 +310,38 @@ function convertOutputNode(node: WorkflowNode, incomingEdges: WorkflowEdge[]): S
   };
 }
 
+/**
+ * Converts a MaestroAI ErrorHandlerConfig to a Stepflow on_error object.
+ */
+function buildOnError(config: any): StepflowErrorHandler | undefined {
+  const errorConfig = config?.onError;
+  if (!errorConfig) return undefined;
+
+  switch (errorConfig.strategy) {
+    case 'retry':
+      return {
+        type: 'retry',
+        max_attempts: errorConfig.maxAttempts ?? 3
+      };
+    case 'default':
+      return {
+        type: 'default',
+        value: errorConfig.fallbackValue ?? null
+      };
+    case 'fail':
+      return { type: 'fail' };
+    default:
+      return undefined;
+  }
+}
+
 function convertPromptNode(
-  node: WorkflowNode, 
-  config: any, 
+  node: WorkflowNode,
+  config: any,
   incomingEdges: WorkflowEdge[]
 ): StepflowStep {
   const model = config.model || 'gpt-4';
-  const component = STEPFLOW_MODEL_COMPONENTS[model] || '/builtin/openai';
+  const component = resolveModelComponent(model);
   
   // Build messages array
   const messages: any[] = [];
@@ -270,7 +358,7 @@ function convertPromptNode(
     content: interpolateTemplate(config.userPrompt, incomingEdges)
   });
   
-  return {
+  const step: StepflowStep = {
     id: sanitizeId(node.id),
     component,
     input: {
@@ -283,6 +371,13 @@ function convertPromptNode(
       presence_penalty: config.presencePenalty ?? 0
     }
   };
+
+  const onError = buildOnError(config);
+  if (onError) {
+    step.on_error = onError;
+  }
+
+  return step;
 }
 
 function convertBranchNode(
@@ -373,7 +468,7 @@ function convertModelCompareNode(
     component: '/builtin/parallel',
     input: {
       branches: models.map((model: string) => ({
-        component: STEPFLOW_MODEL_COMPONENTS[model] || '/builtin/openai',
+        component: resolveModelComponent(model),
         input: {
           model,
           messages: [{ role: 'user', content: prompt }],
@@ -411,30 +506,75 @@ function generateInputSchema(inputNodes: WorkflowNode[]): StepflowInputSchema {
 }
 
 /**
- * Converts Handlebars-style templates to Stepflow template syntax
- * {{nodes.nodeId.output}} → "{{$step.nodeId}}"
+ * Converts a MaestroAI prompt template to the appropriate Stepflow value type.
+ *
+ * - Pure references like "{{nodes.step1.output}}" become { $step: "step1" }
+ * - Pure input references like "{{input}}" become { $input: "$" }
+ * - Mixed text + references stay as { $template: "..." } with Stepflow syntax
+ * - Plain strings pass through unchanged
  */
-function interpolateTemplate(template: string, incomingEdges: WorkflowEdge[]): string | { $template: string } {
-  // Check if template uses Handlebars syntax
+function interpolateTemplate(
+  template: string,
+  incomingEdges: WorkflowEdge[]
+): string | StepflowInputValue {
   if (!template.includes('{{')) {
     return template;
   }
-  
-  // Convert Handlebars to Stepflow template syntax
+
+  // Regex to find all Handlebars expressions
+  const handlebarsPattern = /\{\{\s*(.*?)\s*\}\}/g;
+  const matches = [...template.matchAll(handlebarsPattern)];
+
+  if (matches.length === 0) {
+    return template;
+  }
+
+  // If the entire template is a single reference with no surrounding text,
+  // emit a native Stepflow value expression (not a $template string)
+  if (matches.length === 1) {
+    const fullMatch = matches[0][0];
+    const trimmedTemplate = template.trim();
+
+    if (trimmedTemplate === fullMatch) {
+      const expr = matches[0][1].trim();
+
+      // {{input}} -> { $input: "$" }
+      if (expr === 'input') {
+        return { $input: '$' } as any;
+      }
+
+      // {{nodes.step_id.output}} -> { $step: "step_id" }
+      const nodeRef = expr.match(/^nodes\.(\w+)\.output$/);
+      if (nodeRef) {
+        return { $step: sanitizeId(nodeRef[1]) } as any;
+      }
+
+      // {{nodes.step_id.output.field}} -> { $step: "step_id", path: "$.field" }
+      const nodePathRef = expr.match(/^nodes\.(\w+)\.output\.(.+)$/);
+      if (nodePathRef) {
+        return { $step: sanitizeId(nodePathRef[1]), path: `$.${nodePathRef[2]}` } as any;
+      }
+    }
+  }
+
+  // Mixed content: convert to $template with Stepflow reference syntax
   let converted = template;
-  
-  // Replace {{nodes.X.output}} with {{$step.X}}
-  converted = converted.replace(/\{\{\s*nodes\.(\w+)\.output\s*\}\}/g, '{{$step.$1}}');
-  
-  // Replace {{input}} with {{$input}}
-  converted = converted.replace(/\{\{\s*input\s*\}\}/g, '{{$input}}');
-  
-  // If there are incoming edges but no template vars, auto-reference first input
+  converted = converted.replace(
+    /\{\{\s*nodes\.(\w+)\.output\s*\}\}/g,
+    '{{$step.$1}}'
+  );
+  converted = converted.replace(
+    /\{\{\s*input\s*\}\}/g,
+    '{{$input}}'
+  );
+
+  // If no conversions happened and there are still incoming edges,
+  // prepend the first upstream step reference
   if (incomingEdges.length > 0 && !converted.includes('{{$')) {
     converted = `{{$step.${sanitizeId(incomingEdges[0].source)}}} ${converted}`;
   }
-  
-  return { $template: converted };
+
+  return { $template: converted } as any;
 }
 
 /**
@@ -609,21 +749,22 @@ export function toStepflowYAML(workflow: Workflow): string {
   yaml += `name: "${stepflow.name}"\n`;
   yaml += `description: "${stepflow.description || ''}"\n\n`;
   
-  if (stepflow.input_schema) {
-    yaml += `input_schema:\n`;
-    yaml += `  type: ${stepflow.input_schema.type}\n`;
-    if (stepflow.input_schema.properties) {
-      yaml += `  properties:\n`;
-      for (const [key, prop] of Object.entries(stepflow.input_schema.properties)) {
-        yaml += `    ${key}:\n`;
-        yaml += `      type: ${prop.type}\n`;
-        if (prop.description) yaml += `      description: "${prop.description}"\n`;
-        if (prop.default !== undefined) yaml += `      default: ${prop.default}\n`;
+  if (stepflow.schemas?.input) {
+    yaml += `schemas:\n`;
+    yaml += `  input:\n`;
+    yaml += `    type: ${stepflow.schemas.input.type}\n`;
+    if (stepflow.schemas.input.properties) {
+      yaml += `    properties:\n`;
+      for (const [key, prop] of Object.entries(stepflow.schemas.input.properties)) {
+        yaml += `      ${key}:\n`;
+        yaml += `        type: ${prop.type}\n`;
+        if (prop.description) yaml += `        description: "${prop.description}"\n`;
+        if (prop.default !== undefined) yaml += `        default: ${prop.default}\n`;
       }
     }
     yaml += `\n`;
   }
-  
+
   yaml += `steps:\n`;
   for (const step of stepflow.steps) {
     yaml += `  - id: ${step.id}\n`;
@@ -633,14 +774,37 @@ export function toStepflowYAML(workflow: Workflow): string {
     
     if (step.on_error) {
       yaml += `    on_error:\n`;
-      yaml += `      action: ${step.on_error.action}\n`;
+      if (step.on_error.type) {
+        yaml += `      type: ${step.on_error.type}\n`;
+      }
+      if (step.on_error.action) {
+        yaml += `      action: ${step.on_error.action}\n`;
+      }
+      if (step.on_error.max_attempts) {
+        yaml += `      max_attempts: ${step.on_error.max_attempts}\n`;
+      }
       if (step.on_error.max_retries) {
         yaml += `      max_retries: ${step.on_error.max_retries}\n`;
+      }
+      if (step.on_error.value !== undefined) {
+        yaml += `      value: ${JSON.stringify(step.on_error.value)}\n`;
       }
     }
     yaml += `\n`;
   }
-  
+
+  // Emit flow-level output
+  if (stepflow.output) {
+    yaml += `\n`;
+    if (typeof stepflow.output === 'object' && '$step' in (stepflow.output as any)) {
+      yaml += `output:\n`;
+      yaml += `  $step: ${(stepflow.output as any).$step}\n`;
+    } else if (typeof stepflow.output === 'object') {
+      yaml += `output:\n`;
+      yaml += objectToYAML(stepflow.output as any, 2);
+    }
+  }
+
   return yaml;
 }
 

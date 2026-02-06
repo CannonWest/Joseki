@@ -14,6 +14,7 @@ import { promisify } from 'util';
 import { readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import yaml from 'js-yaml';
 import { Database } from '../db/database';
 import {
   convertToStepflow,
@@ -21,6 +22,7 @@ import {
   toStepflowYAML,
   toStepflowJSON,
   validateForStepflow,
+  validateStepflowImport,
   StepflowWorkflow
 } from '@maestroai/shared';
 
@@ -181,19 +183,21 @@ router.post('/workflows/:id/stepflow/validate', (req, res) => {
  */
 router.post('/stepflow/import', async (req, res) => {
   try {
-    const stepflowWorkflow: StepflowWorkflow = req.body;
-    
-    // Validate required fields
-    if (!stepflowWorkflow.schema || !stepflowWorkflow.steps) {
+    // Validate against Zod schema
+    const validation = validateStepflowImport(req.body);
+
+    if (!validation.valid) {
       return res.status(400).json({
         error: 'Invalid Stepflow workflow',
-        message: 'Missing required fields: schema, steps'
+        details: validation.errors
       });
     }
-    
+
+    const stepflowWorkflow = validation.data as StepflowWorkflow;
+
     // Convert to MaestroAI format
     const partialWorkflow = convertFromStepflow(stepflowWorkflow);
-    
+
     // Create full workflow with generated ID
     const now = Date.now();
     const workflow = {
@@ -203,11 +207,11 @@ router.post('/stepflow/import', async (req, res) => {
       createdAt: now,
       updatedAt: now
     };
-    
+
     // Save to database
     const db = (req as any).db as Database;
     db.createWorkflow(workflow);
-    
+
     res.status(201).json(workflow);
   } catch (error) {
     res.status(500).json({
@@ -224,30 +228,50 @@ router.post('/stepflow/import', async (req, res) => {
 router.post('/stepflow/import-yaml', async (req, res) => {
   try {
     const yamlContent: string = req.body.yaml;
-    
+
     if (!yamlContent) {
       return res.status(400).json({ error: 'YAML content is required' });
     }
-    
-    // Parse YAML (simple parser - in production use a proper YAML library)
-    const workflow = parseStepflowYAML(yamlContent);
-    
+
+    // Parse with js-yaml — handles nested objects, arrays, multi-line strings,
+    // anchors/aliases, flow sequences, etc.
+    let parsed: any;
+    try {
+      parsed = yaml.load(yamlContent, { schema: yaml.JSON_SCHEMA });
+    } catch (parseErr) {
+      return res.status(400).json({
+        error: 'Invalid YAML syntax',
+        message: parseErr instanceof Error ? parseErr.message : String(parseErr)
+      });
+    }
+
+    // Validate the parsed structure against the Stepflow Zod schema
+    const validationResult = validateStepflowImport(parsed);
+    if (!validationResult.valid) {
+      return res.status(400).json({
+        error: 'Invalid Stepflow workflow',
+        details: validationResult.errors
+      });
+    }
+
+    const stepflowWorkflow = validationResult.data as StepflowWorkflow;
+
     // Convert to MaestroAI format
-    const partialWorkflow = convertFromStepflow(workflow);
-    
+    const partialWorkflow = convertFromStepflow(stepflowWorkflow);
+
     const now = Date.now();
     const fullWorkflow = {
       id: `wf-${now}`,
-      name: workflow.name || 'Imported Workflow',
+      name: stepflowWorkflow.name || 'Imported Workflow',
       ...partialWorkflow,
       createdAt: now,
       updatedAt: now
     };
-    
+
     // Save to database
     const db = (req as any).db as Database;
     db.createWorkflow(fullWorkflow);
-    
+
     res.status(201).json(fullWorkflow);
   } catch (error) {
     res.status(500).json({
@@ -385,62 +409,5 @@ router.get('/stepflow/status', (req, res) => {
     installCommand: 'cargo install stepflow'
   });
 });
-
-// ==================== HELPER FUNCTIONS ====================
-
-/**
- * Simple YAML parser for Stepflow workflows
- * In production, use a proper YAML library like js-yaml
- */
-function parseStepflowYAML(yaml: string): StepflowWorkflow {
-  const lines = yaml.split('\n');
-  const workflow: Partial<StepflowWorkflow> = {
-    steps: []
-  };
-  
-  let currentStep: any = null;
-  let currentSection: string | null = null;
-  let indentStack: { indent: number; obj: any }[] = [];
-  
-  for (const line of lines) {
-    if (line.trim().startsWith('#') || line.trim() === '') continue;
-    
-    const indent = line.search(/\S/);
-    const trimmed = line.trim();
-    const [key, ...valueParts] = trimmed.split(':');
-    const value = valueParts.join(':').trim();
-    
-    if (indent === 0) {
-      // Root level
-      if (key === 'steps') {
-        currentSection = 'steps';
-      } else {
-        (workflow as any)[key] = value.replace(/^["']|["']$/g, '');
-      }
-    } else if (currentSection === 'steps' && indent === 2 && trimmed.startsWith('-')) {
-      // New step
-      currentStep = {};
-      workflow.steps!.push(currentStep);
-      indentStack = [{ indent: 2, obj: currentStep }];
-    } else if (currentStep && indent > 2) {
-      // Step properties
-      // Simple parsing - in production, use proper YAML parser
-      const cleanKey = key.replace(/^- /, '');
-      
-      if (value) {
-        // Try to parse as JSON, fallback to string
-        let parsedValue: any = value.replace(/^["']|["']$/g, '');
-        try {
-          parsedValue = JSON.parse(value);
-        } catch {
-          // Keep as string
-        }
-        currentStep[cleanKey] = parsedValue;
-      }
-    }
-  }
-  
-  return workflow as StepflowWorkflow;
-}
 
 export { router as stepflowRoutes };

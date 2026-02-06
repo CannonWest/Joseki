@@ -2,6 +2,7 @@
 
 // Export Stepflow compatibility layer
 export * from './stepflow';
+export * from './stepflowSchema';
 
 // ==================== Workflow Types ====================
 
@@ -58,6 +59,12 @@ export interface Workflow {
 
 // ==================== Node Config Types ====================
 
+export interface ErrorHandlerConfig {
+  strategy: 'retry' | 'default' | 'fail';
+  maxAttempts?: number;       // for retry
+  fallbackValue?: any;        // for default
+}
+
 export interface PromptConfig {
   systemPrompt: string;
   userPrompt: string;
@@ -67,6 +74,7 @@ export interface PromptConfig {
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  onError?: ErrorHandlerConfig;
 }
 
 export interface BranchConfig {
