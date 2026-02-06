@@ -4,6 +4,28 @@
 export * from './stepflow';
 export * from './stepflowSchema';
 
+// Re-export specific types for convenience
+export type {
+  StepflowWorkflow,
+  StepflowStep,
+  StepflowInputValue,
+  StepflowInputSchema,
+  StepflowBatchSchema,
+  StepflowSchemaProperty,
+  StepflowErrorHandler,
+  StepflowFromReference,
+  StepflowConfig,
+  IdMapping
+} from './stepflow';
+
+export type {
+  ValidatedStepflowWorkflow,
+  ValidatedStepflowConfig,
+  ValidatedStepflowStep,
+  ValidatedStepflowErrorHandler,
+  ValidationResult
+} from './stepflowSchema';
+
 // ==================== Workflow Types ====================
 
 export type NodeType = 

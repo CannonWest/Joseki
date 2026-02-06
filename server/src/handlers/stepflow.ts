@@ -3,6 +3,8 @@
  * 
  * Provides API endpoints for:
  * - Exporting workflows to Stepflow YAML/JSON format
+ * - Exporting to FlowBuilder Python code
+ * - Generating stepflow-config.yml
  * - Importing Stepflow workflows
  * - Validating workflows for Stepflow compatibility
  * - Running workflows via Stepflow runtime (if available)
@@ -23,6 +25,10 @@ import {
   toStepflowJSON,
   validateForStepflow,
   validateStepflowImport,
+  checkCompatibility,
+  generateStepflowConfig,
+  toFlowBuilderPython,
+  generateBatchSchema,
   StepflowWorkflow
 } from '@maestroai/shared';
 
@@ -121,6 +127,103 @@ router.get('/workflows/:id/stepflow/json', (req, res) => {
 });
 
 /**
+ * GET /api/workflows/:id/stepflow/python
+ * Export workflow as FlowBuilder Python code
+ */
+router.get('/workflows/:id/stepflow/python', (req, res) => {
+  const db = (req as any).db as Database;
+  const workflow = db.getWorkflow(req.params.id);
+  
+  if (!workflow) {
+    return res.status(404).json({ error: 'Workflow not found' });
+  }
+  
+  // Validate workflow (warnings are OK for Python export)
+  const validation = validateForStepflow(workflow);
+  if (!validation.valid) {
+    return res.status(400).json({
+      error: 'Workflow validation failed',
+      details: validation.errors
+    });
+  }
+  
+  try {
+    const python = toFlowBuilderPython(workflow);
+    
+    res.setHeader('Content-Type', 'text/x-python');
+    res.setHeader('Content-Disposition', `attachment; filename="${workflow.name.replace(/\s+/g, '_')}_flow.py"`);
+    res.send(python);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to generate Python code',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * GET /api/workflows/:id/stepflow/config
+ * Generate stepflow-config.yml for the workflow
+ */
+router.get('/workflows/:id/stepflow/config', (req, res) => {
+  const db = (req as any).db as Database;
+  const workflow = db.getWorkflow(req.params.id);
+  
+  if (!workflow) {
+    return res.status(404).json({ error: 'Workflow not found' });
+  }
+  
+  try {
+    const config = generateStepflowConfig(workflow);
+    
+    res.setHeader('Content-Type', 'text/yaml');
+    res.setHeader('Content-Disposition', `attachment; filename="stepflow-config.yaml"`);
+    res.send(config);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to generate configuration',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * GET /api/workflows/:id/stepflow/batch-schema
+ * Get batch execution schema for the workflow
+ */
+router.get('/workflows/:id/stepflow/batch-schema', (req, res) => {
+  const db = (req as any).db as Database;
+  const workflow = db.getWorkflow(req.params.id);
+  
+  if (!workflow) {
+    return res.status(404).json({ error: 'Workflow not found' });
+  }
+  
+  try {
+    const batchSchema = generateBatchSchema(workflow);
+    
+    res.json({
+      schema: batchSchema,
+      example: [
+        {
+          // Example batch item based on input nodes
+          ...Object.fromEntries(
+            workflow.nodes
+              .filter(n => n.type === 'input')
+              .map(n => [n.id, 'example_value'])
+          )
+        }
+      ]
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to generate batch schema',
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
  * GET /api/workflows/:id/stepflow/preview
  * Preview Stepflow format without downloading
  */
@@ -136,15 +239,18 @@ router.get('/workflows/:id/stepflow/preview', (req, res) => {
     const stepflow = convertToStepflow(workflow);
     const yaml = toStepflowYAML(workflow);
     const validation = validateForStepflow(workflow);
+    const compatibility = checkCompatibility(stepflow);
     
     res.json({
       workflow: stepflow,
       yaml,
       validation: {
         valid: validation.valid,
-        errors: validation.errors
+        errors: validation.errors,
+        warnings: validation.warnings
       },
-      canRunWithStepflow: stepflowCliAvailable
+      compatibility,
+      canRunWithStepflow: stepflowCliAvailable && validation.valid
     });
   } catch (error) {
     res.status(500).json({
@@ -167,10 +273,14 @@ router.post('/workflows/:id/stepflow/validate', (req, res) => {
   }
   
   const validation = validateForStepflow(workflow);
+  const stepflow = convertToStepflow(workflow);
+  const compatibility = checkCompatibility(stepflow);
   
   res.json({
     valid: validation.valid,
     errors: validation.errors,
+    warnings: validation.warnings,
+    compatibility,
     canRunWithStepflow: stepflowCliAvailable && validation.valid
   });
 });
@@ -189,7 +299,8 @@ router.post('/stepflow/import', async (req, res) => {
     if (!validation.valid) {
       return res.status(400).json({
         error: 'Invalid Stepflow workflow',
-        details: validation.errors
+        details: validation.errors,
+        warnings: validation.warnings
       });
     }
 
@@ -212,7 +323,11 @@ router.post('/stepflow/import', async (req, res) => {
     const db = (req as any).db as Database;
     db.createWorkflow(workflow);
 
-    res.status(201).json(workflow);
+    res.status(201).json({
+      workflow,
+      warnings: validation.warnings,
+      compatibility: checkCompatibility(stepflowWorkflow)
+    });
   } catch (error) {
     res.status(500).json({
       error: 'Failed to import workflow',
@@ -250,7 +365,8 @@ router.post('/stepflow/import-yaml', async (req, res) => {
     if (!validationResult.valid) {
       return res.status(400).json({
         error: 'Invalid Stepflow workflow',
-        details: validationResult.errors
+        details: validationResult.errors,
+        warnings: validationResult.warnings
       });
     }
 
@@ -272,7 +388,11 @@ router.post('/stepflow/import-yaml', async (req, res) => {
     const db = (req as any).db as Database;
     db.createWorkflow(fullWorkflow);
 
-    res.status(201).json(fullWorkflow);
+    res.status(201).json({
+      workflow: fullWorkflow,
+      warnings: validationResult.warnings,
+      compatibility: checkCompatibility(stepflowWorkflow)
+    });
   } catch (error) {
     res.status(500).json({
       error: 'Failed to import YAML',
@@ -315,6 +435,7 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
   const tempDir = join(tmpdir(), 'maestroai-stepflow');
   const workflowPath = join(tempDir, `${executionId}.yaml`);
   const inputPath = join(tempDir, `${executionId}-input.json`);
+  const configPath = join(tempDir, `${executionId}-config.yaml`);
   
   try {
     // Create temp directory
@@ -324,6 +445,10 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
     const yaml = toStepflowYAML(workflow);
     await writeFile(workflowPath, yaml, 'utf-8');
     
+    // Generate and write config
+    const config = generateStepflowConfig(workflow);
+    await writeFile(configPath, config, 'utf-8');
+    
     // Write input if provided
     const input = req.body.input || {};
     await writeFile(inputPath, JSON.stringify(input, null, 2), 'utf-8');
@@ -332,7 +457,8 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
     const stepflowProcess = spawn('stepflow', [
       'run',
       `--flow=${workflowPath}`,
-      `--input=${inputPath}`
+      `--input=${inputPath}`,
+      `--config=${configPath}`
     ], {
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -353,6 +479,7 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
       try {
         await unlink(workflowPath);
         await unlink(inputPath);
+        await unlink(configPath);
       } catch {
         // Ignore cleanup errors
       }
@@ -387,6 +514,7 @@ router.post('/workflows/:id/stepflow/run', async (req, res) => {
     try {
       await unlink(workflowPath);
       await unlink(inputPath);
+      await unlink(configPath);
     } catch {
       // Ignore cleanup errors
     }
@@ -406,7 +534,8 @@ router.get('/stepflow/status', (req, res) => {
   res.json({
     available: stepflowCliAvailable,
     version: stepflowVersion,
-    installCommand: 'cargo install stepflow'
+    installCommand: 'cargo install stepflow',
+    documentation: 'https://stepflow.org/docs'
   });
 });
 

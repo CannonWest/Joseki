@@ -40,6 +40,7 @@ export interface StepflowWorkflow {
   // Stepflow canonical format
   schemas?: {
     input?: StepflowInputSchema;
+    batch?: StepflowBatchSchema;
   };
   // Legacy MaestroAI format (kept for backward compatibility on import)
   input_schema?: StepflowInputSchema;
@@ -54,6 +55,15 @@ export interface StepflowInputSchema {
   required?: string[];
 }
 
+export interface StepflowBatchSchema {
+  type: 'array';
+  items: {
+    type: 'object';
+    properties?: Record<string, StepflowSchemaProperty>;
+    required?: string[];
+  };
+}
+
 export interface StepflowSchemaProperty {
   type: string;
   description?: string;
@@ -65,6 +75,8 @@ export interface StepflowStep {
   component: string;
   input: Record<string, StepflowInputValue>;
   on_error?: StepflowErrorHandler;
+  must_execute?: boolean;
+  metadata?: Record<string, any>;
 }
 
 export type StepflowInputValue = 
@@ -75,10 +87,11 @@ export type StepflowInputValue =
   | StepflowInputValue[]
   | { [key: string]: StepflowInputValue }
   | { $from: StepflowFromReference }
-  | { $step: string }
+  | { $step: string; path?: string }
   | { $input: string }
-  | { $variable: string }
-  | { $template: string };
+  | { $variable: string; default?: any }
+  | { $template: string }
+  | { $literal: any };
 
 export interface StepflowFromReference {
   workflow?: { path: string };
@@ -94,6 +107,53 @@ export interface StepflowErrorHandler {
   // Legacy MaestroAI export format
   action?: 'retry' | 'skip' | 'fail';
   max_retries?: number;
+}
+
+// ==================== ID Mapping for Round-Trip Consistency ====================
+
+/**
+ * Maps original node IDs to sanitized Stepflow-compatible IDs.
+ * This ensures bidirectional consistency during export/import round-trips.
+ */
+export interface IdMapping {
+  originalToSanitized: Map<string, string>;
+  sanitizedToOriginal: Map<string, string>;
+}
+
+/**
+ * Creates a bidirectional ID mapping for a workflow.
+ */
+export function createIdMapping(nodes: WorkflowNode[]): IdMapping {
+  const originalToSanitized = new Map<string, string>();
+  const sanitizedToOriginal = new Map<string, string>();
+  
+  for (const node of nodes) {
+    const sanitized = sanitizeId(node.id);
+    originalToSanitized.set(node.id, sanitized);
+    sanitizedToOriginal.set(sanitized, node.id);
+  }
+  
+  return { originalToSanitized, sanitizedToOriginal };
+}
+
+/**
+ * Sanitizes node IDs for Stepflow compatibility with collision handling.
+ * Stepflow step IDs should be alphanumeric with underscores.
+ */
+export function sanitizeId(id: string, existingIds: Set<string> = new Set()): string {
+  let sanitized = id
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/^[0-9]/, '_$&');  // Can't start with number
+  
+  // Handle collisions by appending a counter
+  let counter = 1;
+  let uniqueId = sanitized;
+  while (existingIds.has(uniqueId) && uniqueId !== id) {
+    uniqueId = `${sanitized}_${counter}`;
+    counter++;
+  }
+  
+  return uniqueId;
 }
 
 // ==================== Stepflow Component Mapping ====================
@@ -155,6 +215,9 @@ export function resolveModelComponent(modelId: string): string {
  * Converts a MaestroAI workflow to Stepflow YAML/JSON format
  */
 export function convertToStepflow(workflow: Workflow): StepflowWorkflow {
+  // Create ID mapping for round-trip consistency
+  const idMapping = createIdMapping(workflow.nodes);
+  
   // Build adjacency list for dependency tracking
   const incomingEdges = new Map<string, WorkflowEdge[]>();
   const outgoingEdges = new Map<string, WorkflowEdge[]>();
@@ -194,7 +257,7 @@ export function convertToStepflow(workflow: Workflow): StepflowWorkflow {
       }
     }
     
-    const step = convertNodeToStep(node, deps, workflow.nodes);
+    const step = convertNodeToStep(node, deps, workflow.nodes, idMapping);
     steps.push(step);
     processedNodes.add(node.id);
   }
@@ -231,11 +294,13 @@ export function convertToStepflow(workflow: Workflow): StepflowWorkflow {
 
   // Add flow-level output referencing the terminal step(s)
   if (outputNodes.length === 1) {
-    result.output = { $step: sanitizeId(outputNodes[0].id) };
+    result.output = { $step: idMapping.originalToSanitized.get(outputNodes[0].id) };
   } else if (outputNodes.length > 1) {
     const outputObj: Record<string, any> = {};
     for (const node of outputNodes) {
-      outputObj[sanitizeId(node.id)] = { $step: sanitizeId(node.id) };
+      outputObj[idMapping.originalToSanitized.get(node.id)!] = { 
+        $step: idMapping.originalToSanitized.get(node.id) 
+      };
     }
     result.output = outputObj;
   }
@@ -249,40 +314,41 @@ export function convertToStepflow(workflow: Workflow): StepflowWorkflow {
 function convertNodeToStep(
   node: WorkflowNode, 
   incomingEdges: WorkflowEdge[],
-  allNodes: WorkflowNode[]
+  allNodes: WorkflowNode[],
+  idMapping: IdMapping
 ): StepflowStep {
   const config = node.data.config as Record<string, any>;
   
   switch (node.type) {
     case 'input':
-      return convertInputNode(node, config);
+      return convertInputNode(node, config, idMapping);
       
     case 'output':
-      return convertOutputNode(node, incomingEdges);
+      return convertOutputNode(node, incomingEdges, idMapping);
       
     case 'prompt':
-      return convertPromptNode(node, config, incomingEdges);
+      return convertPromptNode(node, config, incomingEdges, idMapping);
       
     case 'branch':
-      return convertBranchNode(node, config, incomingEdges);
+      return convertBranchNode(node, config, incomingEdges, idMapping);
       
     case 'aggregate':
-      return convertAggregateNode(node, config, incomingEdges);
+      return convertAggregateNode(node, config, incomingEdges, idMapping);
       
     case 'human_gate':
-      return convertHumanGateNode(node, config, incomingEdges);
+      return convertHumanGateNode(node, config, incomingEdges, idMapping);
       
     case 'model_compare':
-      return convertModelCompareNode(node, config, incomingEdges);
+      return convertModelCompareNode(node, config, incomingEdges, idMapping);
       
     default:
       throw new Error(`Unsupported node type: ${node.type}`);
   }
 }
 
-function convertInputNode(node: WorkflowNode, config: any): StepflowStep {
+function convertInputNode(node: WorkflowNode, config: any, idMapping: IdMapping): StepflowStep {
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/input',
     input: {
       input_type: config.inputType || 'text',
@@ -292,19 +358,23 @@ function convertInputNode(node: WorkflowNode, config: any): StepflowStep {
   };
 }
 
-function convertOutputNode(node: WorkflowNode, incomingEdges: WorkflowEdge[]): StepflowStep {
+function convertOutputNode(
+  node: WorkflowNode, 
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
+): StepflowStep {
   const input: Record<string, StepflowInputValue> = {
     format: 'json'
   };
   
   // Reference the previous step's output
   if (incomingEdges.length > 0) {
-    const sourceId = sanitizeId(incomingEdges[0].source);
+    const sourceId = idMapping.originalToSanitized.get(incomingEdges[0].source)!;
     input.value = { $step: sourceId };
   }
   
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/output',
     input
   };
@@ -338,7 +408,8 @@ function buildOnError(config: any): StepflowErrorHandler | undefined {
 function convertPromptNode(
   node: WorkflowNode,
   config: any,
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): StepflowStep {
   const model = config.model || 'gpt-4';
   const component = resolveModelComponent(model);
@@ -349,17 +420,17 @@ function convertPromptNode(
   if (config.systemPrompt) {
     messages.push({
       role: 'system',
-      content: interpolateTemplate(config.systemPrompt, incomingEdges)
+      content: interpolateTemplate(config.systemPrompt, incomingEdges, idMapping)
     });
   }
   
   messages.push({
     role: 'user',
-    content: interpolateTemplate(config.userPrompt, incomingEdges)
+    content: interpolateTemplate(config.userPrompt, incomingEdges, idMapping)
   });
   
   const step: StepflowStep = {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component,
     input: {
       model: config.model || 'gpt-4',
@@ -376,6 +447,11 @@ function convertPromptNode(
   if (onError) {
     step.on_error = onError;
   }
+  
+  // Support must_execute flag
+  if (config.mustExecute) {
+    step.must_execute = true;
+  }
 
   return step;
 }
@@ -383,7 +459,8 @@ function convertPromptNode(
 function convertBranchNode(
   node: WorkflowNode, 
   config: any, 
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): StepflowStep {
   // Stepflow conditional branching
   const branches = config.branches || [
@@ -391,7 +468,7 @@ function convertBranchNode(
   ];
   
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/conditional',
     input: {
       condition: config.condition || 'true',
@@ -407,17 +484,18 @@ function convertBranchNode(
 function convertAggregateNode(
   node: WorkflowNode, 
   config: any, 
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): StepflowStep {
   const strategy = config.strategy || 'concat';
   
   // Build input references from all incoming edges
   const inputs = incomingEdges.map(edge => ({
-    $step: sanitizeId(edge.source)
+    $step: idMapping.originalToSanitized.get(edge.source)!
   }));
   
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/aggregate',
     input: {
       strategy,  // 'concat', 'vote', 'merge'
@@ -430,7 +508,8 @@ function convertAggregateNode(
 function convertHumanGateNode(
   node: WorkflowNode, 
   config: any, 
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): StepflowStep {
   const input: Record<string, StepflowInputValue> = {
     instructions: config.instructions || config.approvalPrompt || 'Please review and approve',
@@ -443,11 +522,11 @@ function convertHumanGateNode(
   
   // Reference the value to review
   if (incomingEdges.length > 0) {
-    input.value = { $step: sanitizeId(incomingEdges[0].source) };
+    input.value = { $step: idMapping.originalToSanitized.get(incomingEdges[0].source)! };
   }
   
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/pause',
     input
   };
@@ -456,15 +535,16 @@ function convertHumanGateNode(
 function convertModelCompareNode(
   node: WorkflowNode, 
   config: any, 
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): StepflowStep {
   const models = config.models || ['gpt-4', 'claude-3-opus'];
   
   // Create parallel steps for each model
-  const prompt = interpolateTemplate(config.prompt, incomingEdges);
+  const prompt = interpolateTemplate(config.prompt, incomingEdges, idMapping);
   
   return {
-    id: sanitizeId(node.id),
+    id: idMapping.originalToSanitized.get(node.id)!,
     component: '/builtin/parallel',
     input: {
       branches: models.map((model: string) => ({
@@ -512,13 +592,26 @@ function generateInputSchema(inputNodes: WorkflowNode[]): StepflowInputSchema {
  * - Pure input references like "{{input}}" become { $input: "$" }
  * - Mixed text + references stay as { $template: "..." } with Stepflow syntax
  * - Plain strings pass through unchanged
+ * - Escaped braces \{\{ become literal {{ via $literal
  */
-function interpolateTemplate(
+export function interpolateTemplate(
   template: string,
-  incomingEdges: WorkflowEdge[]
+  incomingEdges: WorkflowEdge[],
+  idMapping: IdMapping
 ): string | StepflowInputValue {
   if (!template.includes('{{')) {
     return template;
+  }
+
+  // Handle escaped braces - convert to $literal
+  if (template.includes('\\{{')) {
+    const literalMatch = template.match(/^\\\{\{(.*?)\\\}\}$/);
+    if (literalMatch) {
+      // Extract content without the escaped braces wrapper
+      return { $literal: literalMatch[1] } as any;
+    }
+    // Replace escaped braces with placeholders, process, then wrap
+    template = template.replace(/\\\{\{/g, 'ESCAPED_OPEN').replace(/\\\}\}/g, 'ESCAPED_CLOSE');
   }
 
   // Regex to find all Handlebars expressions
@@ -526,7 +619,10 @@ function interpolateTemplate(
   const matches = [...template.matchAll(handlebarsPattern)];
 
   if (matches.length === 0) {
-    return template;
+    // Restore escaped braces if no matches
+    return template
+      .replace(/ESCAPED_OPEN/g, '{{')
+      .replace(/ESCAPED_CLOSE/g, '}}');
   }
 
   // If the entire template is a single reference with no surrounding text,
@@ -543,16 +639,24 @@ function interpolateTemplate(
         return { $input: '$' } as any;
       }
 
-      // {{nodes.step_id.output}} -> { $step: "step_id" }
+      // {{nodes.step_id.output}} -> { $step: "step1" }
       const nodeRef = expr.match(/^nodes\.(\w+)\.output$/);
       if (nodeRef) {
-        return { $step: sanitizeId(nodeRef[1]) } as any;
+        const sanitizedId = idMapping.originalToSanitized.get(nodeRef[1]) || nodeRef[1];
+        return { $step: sanitizedId } as any;
       }
 
-      // {{nodes.step_id.output.field}} -> { $step: "step_id", path: "$.field" }
+      // {{nodes.step_id.output.field}} -> { $step: "step1", path: "$.field" }
       const nodePathRef = expr.match(/^nodes\.(\w+)\.output\.(.+)$/);
       if (nodePathRef) {
-        return { $step: sanitizeId(nodePathRef[1]), path: `$.${nodePathRef[2]}` } as any;
+        const sanitizedId = idMapping.originalToSanitized.get(nodePathRef[1]) || nodePathRef[1];
+        return { $step: sanitizedId, path: `$.${nodePathRef[2]}` } as any;
+      }
+      
+      // {{variable.name}} -> { $variable: "name" }
+      const varRef = expr.match(/^variable\.(\w+)$/);
+      if (varRef) {
+        return { $variable: varRef[1] } as any;
       }
     }
   }
@@ -561,30 +665,33 @@ function interpolateTemplate(
   let converted = template;
   converted = converted.replace(
     /\{\{\s*nodes\.(\w+)\.output\s*\}\}/g,
-    '{{$step.$1}}'
+    (match, nodeId) => {
+      const sanitizedId = idMapping.originalToSanitized.get(nodeId) || nodeId;
+      return `{{$step.${sanitizedId}}}`;
+    }
   );
   converted = converted.replace(
     /\{\{\s*input\s*\}\}/g,
     '{{$input}}'
   );
+  converted = converted.replace(
+    /\{\{\s*variable\.(\w+)\s*\}\}/g,
+    '{{$variable.$1}}'
+  );
+
+  // Restore escaped braces
+  converted = converted
+    .replace(/ESCAPED_OPEN/g, '{{')
+    .replace(/ESCAPED_CLOSE/g, '}}');
 
   // If no conversions happened and there are still incoming edges,
   // prepend the first upstream step reference
   if (incomingEdges.length > 0 && !converted.includes('{{$')) {
-    converted = `{{$step.${sanitizeId(incomingEdges[0].source)}}} ${converted}`;
+    const sourceId = idMapping.originalToSanitized.get(incomingEdges[0].source)!;
+    converted = `{{$step.${sourceId}}} ${converted}`;
   }
 
   return { $template: converted } as any;
-}
-
-/**
- * Sanitizes node IDs for Stepflow compatibility
- * Stepflow step IDs should be alphanumeric with underscores
- */
-function sanitizeId(id: string): string {
-  return id
-    .replace(/[^a-zA-Z0-9_]/g, '_')
-    .replace(/^[0-9]/, '_$&');  // Can't start with number
 }
 
 // ==================== Import from Stepflow ====================
@@ -596,13 +703,27 @@ export function convertFromStepflow(stepflowWorkflow: StepflowWorkflow): Partial
   const nodes: WorkflowNode[] = [];
   const edges: WorkflowEdge[] = [];
   
+  // Build reverse ID mapping from sanitized to safe original IDs
+  const sanitizedToOriginal = new Map<string, string>();
+  
   // Track node positions (simple layout algorithm)
   let yPosition = 50;
   const xPosition = 250;
   const yIncrement = 150;
   
   for (const step of stepflowWorkflow.steps) {
-    const node = convertStepToNode(step, { x: xPosition, y: yPosition });
+    // Create a safe original ID from the sanitized one
+    let originalId = step.id;
+    
+    // If the sanitized ID starts with underscore (was numeric), try to find better name
+    if (step.id.startsWith('_') && step.id.length > 1) {
+      // Keep it but track the mapping
+      originalId = step.id;
+    }
+    
+    sanitizedToOriginal.set(step.id, originalId);
+    
+    const node = convertStepToNode(step, { x: xPosition, y: yPosition }, originalId);
     nodes.push(node);
     yPosition += yIncrement;
   }
@@ -611,15 +732,17 @@ export function convertFromStepflow(stepflowWorkflow: StepflowWorkflow): Partial
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
   
   for (const step of stepflowWorkflow.steps) {
-    const targetId = step.id.replace(/^_/, '');  // Remove leading underscore we might have added
+    const targetId = sanitizedToOriginal.get(step.id) || step.id;
     const references = extractStepReferences(step.input);
     
     for (const sourceId of references) {
-      const sanitizedSource = sourceId.replace(/^_/, '');
-      if (nodeMap.has(sanitizedSource) || nodeMap.has(sourceId)) {
+      // Try to find the node with the original or sanitized ID
+      const originalSourceId = sanitizedToOriginal.get(sourceId) || sourceId;
+      
+      if (nodeMap.has(originalSourceId)) {
         edges.push({
-          id: `edge-${sanitizedSource}-${targetId}`,
-          source: sanitizedSource,
+          id: `edge-${originalSourceId}-${targetId}`,
+          source: originalSourceId,
           target: targetId
         });
       }
@@ -634,7 +757,11 @@ export function convertFromStepflow(stepflowWorkflow: StepflowWorkflow): Partial
   };
 }
 
-function convertStepToNode(step: StepflowStep, position: { x: number; y: number }): WorkflowNode {
+function convertStepToNode(
+  step: StepflowStep, 
+  position: { x: number; y: number },
+  originalId: string
+): WorkflowNode {
   const component = step.component;
   const input = step.input;
   
@@ -651,6 +778,16 @@ function convertStepToNode(step: StepflowStep, position: { x: number; y: number 
   // Build config based on type
   const config: any = {};
   
+  // Extract must_execute if present
+  if (step.must_execute !== undefined) {
+    config.mustExecute = step.must_execute;
+  }
+  
+  // Extract metadata if present
+  if (step.metadata) {
+    config.metadata = step.metadata;
+  }
+  
   switch (type) {
     case 'prompt':
       config.model = input.model || 'gpt-4';
@@ -665,11 +802,21 @@ function convertStepToNode(step: StepflowStep, position: { x: number; y: number 
       if (Array.isArray(messages)) {
         const systemMsg = messages.find((m: any) => m?.role === 'system');
         const userMsg = messages.find((m: any) => m?.role === 'user');
-        config.systemPrompt = (systemMsg as any)?.content || '';
+        
+        // Handle $literal in content
+        const systemContent = (systemMsg as any)?.content;
+        config.systemPrompt = typeof systemContent === 'object' && systemContent?.$literal 
+          ? `\\{{${systemContent.$literal}\\}}`
+          : (systemContent || '');
+          
         const userContent = (userMsg as any)?.content;
-        config.userPrompt = typeof userContent === 'string' 
-          ? userContent 
-          : '{{$input}}';
+        if (typeof userContent === 'object' && userContent?.$literal) {
+          config.userPrompt = `\\{{${userContent.$literal}\\}}`;
+        } else if (typeof userContent === 'string') {
+          config.userPrompt = userContent;
+        } else {
+          config.userPrompt = '{{$input}}';
+        }
       } else {
         config.systemPrompt = 'You are a helpful assistant.';
         config.userPrompt = '{{$input}}';
@@ -708,7 +855,7 @@ function convertStepToNode(step: StepflowStep, position: { x: number; y: number 
   }
   
   return {
-    id: step.id.replace(/^_/, ''),  // Ensure valid ID
+    id: originalId,
     type,
     position,
     data: {
@@ -746,8 +893,8 @@ export function toStepflowYAML(workflow: Workflow): string {
   let yaml = `# Stepflow Workflow\n`;
   yaml += `# Generated by MaestroAI\n`;
   yaml += `schema: ${stepflow.schema}\n`;
-  yaml += `name: "${stepflow.name}"\n`;
-  yaml += `description: "${stepflow.description || ''}"\n\n`;
+  yaml += `name: "${escapeYamlString(stepflow.name)}"\n`;
+  yaml += `description: "${escapeYamlString(stepflow.description || '')}"\n\n`;
   
   if (stepflow.schemas?.input) {
     yaml += `schemas:\n`;
@@ -758,9 +905,12 @@ export function toStepflowYAML(workflow: Workflow): string {
       for (const [key, prop] of Object.entries(stepflow.schemas.input.properties)) {
         yaml += `      ${key}:\n`;
         yaml += `        type: ${prop.type}\n`;
-        if (prop.description) yaml += `        description: "${prop.description}"\n`;
-        if (prop.default !== undefined) yaml += `        default: ${prop.default}\n`;
+        if (prop.description) yaml += `        description: "${escapeYamlString(prop.description)}"\n`;
+        if (prop.default !== undefined) yaml += `        default: ${JSON.stringify(prop.default)}\n`;
       }
+    }
+    if (stepflow.schemas.input.required && stepflow.schemas.input.required.length > 0) {
+      yaml += `    required: [${stepflow.schemas.input.required.map(r => `"${r}"`).join(', ')}]\n`;
     }
     yaml += `\n`;
   }
@@ -769,6 +919,11 @@ export function toStepflowYAML(workflow: Workflow): string {
   for (const step of stepflow.steps) {
     yaml += `  - id: ${step.id}\n`;
     yaml += `    component: ${step.component}\n`;
+    
+    if (step.must_execute) {
+      yaml += `    must_execute: true\n`;
+    }
+    
     yaml += `    input:\n`;
     yaml += objectToYAML(step.input, 6);
     
@@ -808,6 +963,18 @@ export function toStepflowYAML(workflow: Workflow): string {
   return yaml;
 }
 
+/**
+ * Escapes special characters in YAML strings
+ */
+function escapeYamlString(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
 function objectToYAML(obj: any, indent: number): string {
   const spaces = ' '.repeat(indent);
   let yaml = '';
@@ -816,7 +983,11 @@ function objectToYAML(obj: any, indent: number): string {
     if (value === null || value === undefined) continue;
     
     if (typeof value === 'object' && !Array.isArray(value)) {
-      if ('$from' in value || '$step' in value || '$input' in value || '$variable' in value || '$template' in value) {
+      if ('$literal' in value) {
+        // $literal - output the literal value
+        yaml += `${spaces}${key}:\n`;
+        yaml += `${spaces}  $literal: ${JSON.stringify((value as any).$literal)}\n`;
+      } else if ('$from' in value || '$step' in value || '$input' in value || '$variable' in value || '$template' in value) {
         // Stepflow reference syntax
         yaml += `${spaces}${key}:\n`;
         for (const [refKey, refVal] of Object.entries(value)) {
@@ -852,13 +1023,325 @@ export function toStepflowJSON(workflow: Workflow): string {
   return JSON.stringify(stepflow, null, 2);
 }
 
+// ==================== FlowBuilder Python Export ====================
+
+/**
+ * Generates FlowBuilder Python code for the workflow.
+ * This allows programmatic workflow construction using the Stepflow Python SDK.
+ */
+export function toFlowBuilderPython(workflow: Workflow): string {
+  const stepflow = convertToStepflow(workflow);
+  const idMapping = createIdMapping(workflow.nodes);
+  
+  let code = `# FlowBuilder Python Code
+# Generated by MaestroAI from workflow: "${escapePythonString(workflow.name)}"
+# 
+# This code uses the Stepflow Python SDK (stepflow_py) to programmatically
+# construct the workflow. Install with: pip install stepflow-py
+
+from stepflow_py.worker import FlowBuilder, Value
+
+# Create a new FlowBuilder
+builder = FlowBuilder(
+    name="${escapePythonString(stepflow.name)}",
+    description="${escapePythonString(stepflow.description || '')}"
+)
+
+`;
+
+  // Generate step variables
+  const stepVars: string[] = [];
+  for (const step of stepflow.steps) {
+    const varName = `step_${step.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    stepVars.push(varName);
+    
+    code += `# Step: ${step.id} (${step.component})
+`;
+    code += `${varName} = builder.add_step(\n`;
+    code += `    step_id="${step.id}",\n`;
+    code += `    component="${step.component}",\n`;
+    code += `    input_data=${pythonDictString(step.input, 4)}`;
+    
+    if (step.must_execute) {
+      code += `,\n    must_execute=True`;
+    }
+    
+    if (step.on_error) {
+      code += `,\n    on_error=${pythonDictString(step.on_error, 4)}`;
+    }
+    
+    code += `\n)\n\n`;
+  }
+
+  // Set output
+  if (stepflow.output) {
+    code += `# Set flow output\n`;
+    code += `builder.set_output(\n`;
+    code += `    ${pythonValueString(stepflow.output, 4)}\n`;
+    code += `)\n\n`;
+  }
+
+  code += `# Build the flow
+flow = builder.build()
+
+# Example usage:
+# async with StepflowClient.local() as client:
+#     response = await client.store_flow(flow)
+#     result = await client.run(response.flow_id, {"input": "your input here"})
+`;
+
+  return code;
+}
+
+function escapePythonString(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+function pythonValueString(value: any, indent: number): string {
+  const spaces = ' '.repeat(indent);
+  
+  if (value === null) return 'None';
+  if (value === undefined) return 'None';
+  if (typeof value === 'string') return `"${escapePythonString(value)}"`;
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    const items = value.map(v => pythonValueString(v, indent + 2));
+    return `[\n${spaces}  ${items.join(`,\n${spaces}  `)}\n${spaces}]`;
+  }
+  
+  if (typeof value === 'object') {
+    // Handle Value expressions
+    if ('$step' in value) {
+      if (value.path) {
+        return `Value.step("${value.$step}", "${value.path}")`;
+      }
+      return `Value.step("${value.$step}")`;
+    }
+    if ('$input' in value) {
+      if (value.$input === '$') {
+        return 'Value.input()';
+      }
+      return `Value.input("${value.$input}")`;
+    }
+    if ('$variable' in value) {
+      if (value.default !== undefined) {
+        return `Value.variable("${value.$variable}", default=${pythonValueString(value.default, 0)})`;
+      }
+      return `Value.variable("${value.$variable}")`;
+    }
+    if ('$template' in value) {
+      return `Value.template("${escapePythonString(value.$template)}")`;
+    }
+    if ('$literal' in value) {
+      return `Value.literal(${pythonValueString(value.$literal, 0)})`;
+    }
+    
+    // Regular dict
+    return pythonDictString(value, indent);
+  }
+  
+  return String(value);
+}
+
+function pythonDictString(obj: Record<string, any>, indent: number): string {
+  const spaces = ' '.repeat(indent);
+  const entries = Object.entries(obj);
+  
+  if (entries.length === 0) return '{}';
+  
+  let result = '{\n';
+  for (const [key, value] of entries) {
+    result += `${spaces}    "${key}": ${pythonValueString(value, indent + 4)},\n`;
+  }
+  result += `${spaces}}`;
+  
+  return result;
+}
+
+// ==================== Configuration Generation ====================
+
+/**
+ * Stepflow plugin configuration
+ */
+export interface StepflowConfig {
+  plugins: Record<string, {
+    type: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+  }>;
+  routes: Record<string, Array<{ plugin: string }>>;
+  stateStore?: {
+    type: string;
+    databaseUrl?: string;
+    autoMigrate?: boolean;
+  };
+}
+
+/**
+ * Generates a stepflow-config.yml content for running the workflow.
+ */
+export function generateStepflowConfig(workflow?: Workflow): string {
+  const config: StepflowConfig = {
+    plugins: {
+      builtin: {
+        type: 'builtin'
+      }
+    },
+    routes: {
+      "/builtin/{*component}": [
+        { plugin: 'builtin' }
+      ],
+      "/{*component}": [
+        { plugin: 'builtin' }
+      ]
+    },
+    stateStore: {
+      type: 'sqlite',
+      databaseUrl: 'sqlite:workflow_state.db',
+      autoMigrate: true
+    }
+  };
+  
+  // Detect if workflow uses models that need external plugins
+  const usedComponents = new Set<string>();
+  if (workflow) {
+    for (const node of workflow.nodes) {
+      if (node.type === 'prompt') {
+        const modelConfig = node.data.config as any;
+        if (modelConfig?.model) {
+          const component = resolveModelComponent(modelConfig.model);
+          usedComponents.add(component);
+        }
+      }
+    }
+  }
+  
+  // Add Anthropic plugin if needed
+  if (usedComponents.has('/stepflow-anthropic/anthropic')) {
+    config.plugins.anthropic = {
+      type: 'stepflow',
+      command: 'uv',
+      args: ['run', '--package', 'stepflow-anthropic', 'stepflow_anthropic'],
+      env: {
+        ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'
+      }
+    };
+    config.routes["/stepflow-anthropic/{*component}"] = [{ plugin: 'anthropic' }];
+  }
+  
+  // Add Cohere plugin if needed
+  if (usedComponents.has('/stepflow-cohere/cohere')) {
+    config.plugins.cohere = {
+      type: 'stepflow',
+      command: 'uv',
+      args: ['run', '--package', 'stepflow-cohere', 'stepflow_cohere'],
+      env: {
+        COHERE_API_KEY: '${COHERE_API_KEY:-}'
+      }
+    };
+    config.routes["/stepflow-cohere/{*component}"] = [{ plugin: 'cohere' }];
+  }
+  
+  // Generate YAML
+  let yaml = `# Stepflow Configuration
+# Generated by MaestroAI
+# 
+# This configuration file defines plugins and routing for the Stepflow runtime.
+# Place this file alongside your workflow YAML and run with:
+#   stepflow run --flow=workflow.yaml --config=stepflow-config.yaml
+
+`;
+
+  yaml += `plugins:\n`;
+  for (const [name, plugin] of Object.entries(config.plugins)) {
+    yaml += `  ${name}:\n`;
+    yaml += `    type: ${plugin.type}\n`;
+    if (plugin.command) {
+      yaml += `    command: ${plugin.command}\n`;
+    }
+    if (plugin.args) {
+      yaml += `    args: [${plugin.args.map(a => `"${a}"`).join(', ')}]\n`;
+    }
+    if (plugin.env) {
+      yaml += `    env:\n`;
+      for (const [key, value] of Object.entries(plugin.env)) {
+        yaml += `      ${key}: "${value}"\n`;
+      }
+    }
+    if (plugin.url) {
+      yaml += `    url: "${plugin.url}"\n`;
+    }
+  }
+
+  yaml += `\nroutes:\n`;
+  for (const [route, handlers] of Object.entries(config.routes)) {
+    yaml += `  "${route}":\n`;
+    for (const handler of handlers) {
+      yaml += `    - plugin: ${handler.plugin}\n`;
+    }
+  }
+
+  yaml += `\nstateStore:\n`;
+  yaml += `  type: ${config.stateStore!.type}\n`;
+  if (config.stateStore!.databaseUrl) {
+    yaml += `  databaseUrl: "${config.stateStore!.databaseUrl}"\n`;
+  }
+  if (config.stateStore!.autoMigrate !== undefined) {
+    yaml += `  autoMigrate: ${config.stateStore!.autoMigrate}\n`;
+  }
+
+  return yaml;
+}
+
+// ==================== Batch Execution ====================
+
+/**
+ * Generates a batch execution schema for the workflow.
+ * This allows running the workflow over multiple inputs in parallel.
+ */
+export function generateBatchSchema(workflow: Workflow): StepflowBatchSchema {
+  const inputNodes = workflow.nodes.filter(n => n.type === 'input');
+  
+  const properties: Record<string, StepflowSchemaProperty> = {};
+  for (const node of inputNodes) {
+    const config = node.data.config as any;
+    properties[node.id] = {
+      type: config.inputType === 'number' ? 'number' : 'string',
+      description: config.description || node.data.label
+    };
+  }
+  
+  return {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties,
+      required: inputNodes
+        .filter(n => (n.data.config as any)?.required)
+        .map(n => n.id)
+    }
+  };
+}
+
 // ==================== Validation ====================
 
 /**
  * Validates that a MaestroAI workflow can be converted to Stepflow
  */
-export function validateForStepflow(workflow: Workflow): { valid: boolean; errors: string[] } {
+export function validateForStepflow(workflow: Workflow): { valid: boolean; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
   
   // Check for circular dependencies (Stepflow requires DAG)
   const visited = new Set<string>();
@@ -897,11 +1380,35 @@ export function validateForStepflow(workflow: Workflow): { valid: boolean; error
       if (!config.model) {
         errors.push(`Node ${node.id}: Prompt node missing model configuration`);
       }
+      
+      // Check for IDs that will be modified during sanitization
+      const sanitizedId = sanitizeId(node.id);
+      if (sanitizedId !== node.id) {
+        warnings.push(`Node ${node.id}: ID will be sanitized to "${sanitizedId}" for Stepflow compatibility`);
+      }
+    }
+    
+    // Check for potentially problematic characters in templates
+    if (node.data.config?.userPrompt?.includes('\\{{')) {
+      warnings.push(`Node ${node.id}: Uses escaped braces (\\{{) which will be converted to $literal`);
+    }
+  }
+  
+  // Check for orphaned nodes (no connections)
+  const connectedNodes = new Set<string>();
+  for (const edge of workflow.edges) {
+    connectedNodes.add(edge.source);
+    connectedNodes.add(edge.target);
+  }
+  for (const node of workflow.nodes) {
+    if (!connectedNodes.has(node.id) && workflow.nodes.length > 1) {
+      warnings.push(`Node ${node.id}: Orphaned node with no connections`);
     }
   }
   
   return {
     valid: errors.length === 0,
-    errors
+    errors,
+    warnings
   };
 }
