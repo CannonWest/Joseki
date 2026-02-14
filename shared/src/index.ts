@@ -5,6 +5,7 @@ export * from './stepflow';
 export * from './stepflowSchema';
 export * from './stepflowExpressions';
 export * from './stepflowDiscovery';
+export { createExampleWorkflow } from './exampleWorkflow';
 
 // Re-export specific types for convenience
 export type {

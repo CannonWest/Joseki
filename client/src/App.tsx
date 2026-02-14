@@ -48,6 +48,7 @@ import { OutputNode } from './nodes/OutputNode';
 import { AggregateNode } from './nodes/AggregateNode';
 import { HumanGateNode } from './nodes/HumanGateNode';
 import { ModelCompareNode } from './nodes/ModelCompareNode';
+import { createExampleWorkflow } from '@maestroai/shared';
 
 const nodeTypes = {
   prompt: PromptNode,
@@ -506,6 +507,12 @@ function App() {
     setShowWelcome(false);
   };
 
+  const handleLoadExample = () => {
+    const exampleWorkflow = createExampleWorkflow();
+    setCurrentWorkflow(exampleWorkflow);
+    setShowWelcome(false);
+  };
+
   if (showWelcome) {
     return (
       <div className="h-screen w-full bg-slate-950 flex items-center justify-center">
@@ -513,7 +520,7 @@ function App() {
           <h1 className="text-4xl font-bold text-white mb-2">MaestroAI</h1>
           <p className="text-slate-400 mb-8">Visual IDE for conversational AI workflows</p>
           
-          <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="grid grid-cols-3 gap-4 mb-8">
             <button
               onClick={handleCreateWorkflow}
               className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left"
@@ -522,7 +529,16 @@ function App() {
               <div className="font-semibold text-white">Create New Workflow</div>
               <div className="text-sm text-slate-400">Start from scratch</div>
             </button>
-            
+
+            <button
+              onClick={handleLoadExample}
+              className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-emerald-500 transition-colors text-left"
+            >
+              <div className="text-2xl mb-2">&#9889;</div>
+              <div className="font-semibold text-white">Try Example</div>
+              <div className="text-sm text-slate-400">Content Review Pipeline</div>
+            </button>
+
             <button
               onClick={() => handleLoadWorkflow(workflows[0])}
               disabled={workflows.length === 0}

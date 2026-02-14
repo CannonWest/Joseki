@@ -1,5 +1,6 @@
 import DatabaseBetter from 'better-sqlite3';
 import type { Workflow, ExecutionTrace, ConversationTree, ModelConfig } from '@maestroai/shared';
+import { createExampleWorkflow } from '@maestroai/shared';
 
 export class Database {
   private db: DatabaseBetter.Database;
@@ -87,6 +88,13 @@ export class Database {
     const count = this.db.prepare('SELECT COUNT(*) as count FROM model_configs').get() as { count: number };
     if (count.count === 0) {
       this.insertDefaultModels();
+    }
+
+    // Insert example workflow if no workflows exist
+    const workflowCount = this.db.prepare('SELECT COUNT(*) as count FROM workflows').get() as { count: number };
+    if (workflowCount.count === 0) {
+      const example = createExampleWorkflow();
+      this.createWorkflow(example);
     }
   }
 
