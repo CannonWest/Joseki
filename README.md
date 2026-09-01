@@ -2,11 +2,6 @@
 
 A visual IDE for building conversational AI workflows with tree-based branching and multi-model evaluation.
 
-<p align="center">
-  <strong>Powered by <a href="https://stepflow.org">Stepflow</a></strong> — 
-  An open protocol for GenAI workflows
-</p>
-
 ## Features
 
 - **Visual Canvas**: Drag-and-drop workflow builder with React Flow
@@ -14,18 +9,17 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Real-time Execution**: WebSocket streaming with live token output
 - **Time-travel Debugging**: Branch from any point in execution history
 - **Model Comparison**: Compare outputs from multiple LLMs side-by-side
-- **Stepflow Integration**: Export/import workflows in Stepflow format
 - **Dark Mode**: Optimized for long coding sessions
 
 ## Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/[your-username]/maestroai.git
-cd maestroai
+git clone https://github.com/CannonWest/MaestroAI.git
+cd MaestroAI
 
 # Install dependencies
-npm install
+npm run install:all
 
 # Setup environment
 cp .env.example .env
@@ -60,50 +54,6 @@ maestroai/
 2. **Connect Nodes**: Connect nodes by dragging between handles
 3. **Configure**: Click nodes to configure prompts and parameters
 4. **Execute**: Press `Cmd+Enter` to run the workflow
-5. **Export**: Click "⚡ Stepflow" to export to Stepflow format
-
-## Stepflow Integration
-
-MaestroAI generates workflows compatible with the [Stepflow](https://stepflow.org) protocol.
-
-### Export to Stepflow
-
-Any workflow can be exported as Stepflow YAML or JSON:
-
-```bash
-# Download YAML
-curl http://localhost:3001/api/workflows/:id/stepflow/yaml
-
-# Download JSON
-curl http://localhost:3001/api/workflows/:id/stepflow/json
-```
-
-### Import from Stepflow
-
-Import existing Stepflow workflows into the visual editor:
-
-```bash
-POST /api/stepflow/import
-Content-Type: application/json
-
-{
-  "schema": "https://stepflow.org/schemas/v1/flow.json",
-  "name": "My Workflow",
-  "steps": [...]
-}
-```
-
-### Run with Stepflow CLI
-
-If you have the Stepflow CLI installed, you can run workflows directly:
-
-```bash
-# Install Stepflow CLI
-cargo install stepflow
-
-# Run via API
-POST /api/workflows/:id/stepflow/run
-```
 
 ## Keyboard Shortcuts
 
@@ -130,12 +80,7 @@ MaestroAI consists of three main components:
 
 1. **Visual Editor** (`client/`): React-based node editor built with React Flow
 2. **Execution Engine** (`server/`): Node.js backend for workflow execution
-3. **Stepflow Bridge** (`shared/`): Converts between visual graphs and Stepflow YAML
-
-The Stepflow protocol enables:
-- Portable workflow definitions
-- Execution on Stepflow's Rust runtime
-- Integration with Stepflow's component ecosystem
+3. **Shared Types** (`shared/`): Workflow/node/execution types shared by client and server
 
 ## Contributing
 
@@ -151,28 +96,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-### Attribution
-
-This project generates workflow configurations compatible with [Stepflow](https://stepflow.org), 
-an open-source protocol and runtime for GenAI workflows by DataStax Inc., also licensed under 
-Apache License 2.0.
-
-See [NOTICE](NOTICE) file for complete attribution.
+See [NOTICE](NOTICE) file for third-party attribution.
 
 ## Acknowledgments
 
-- [Stepflow](https://stepflow.org) - For the open workflow protocol
 - [React Flow](https://reactflow.dev) - For the node-based UI components
-- [DataStax](https://datastax.com) - For developing and open-sourcing Stepflow
-
-## Links
-
-- **MaestroAI**: [GitHub Repository](https://github.com/[your-username]/maestroai)
-- **Stepflow**: [Website](https://stepflow.org) | [GitHub](https://github.com/stepflow-ai/stepflow)
-- **Documentation**: [Stepflow Docs](https://stepflow.org/docs)
-
----
-
-<p align="center">
-  Built with ❤️ for the AI workflow community
-</p>

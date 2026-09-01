@@ -22,7 +22,6 @@ import { Server } from 'socket.io';
 import { Database } from './db/database';
 import { workflowRoutes } from './handlers/workflows';
 import { executionRoutes } from './handlers/executions';
-import { stepflowRoutes } from './handlers/stepflow';
 import { setupSocketHandlers } from './handlers/socket';
 
 const app = express();
@@ -50,7 +49,6 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/executions', executionRoutes);
-app.use('/api', stepflowRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
