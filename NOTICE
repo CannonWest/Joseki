@@ -1,21 +1,6 @@
 MaestroAI
 Copyright 2025 [Your Name or Organization]
 
-This product includes software developed by:
-
-Stepflow
-Copyright 2025 DataStax Inc.
-
-Stepflow is an open-source protocol and runtime for GenAI workflows,
-licensed under the Apache License 2.0.
-
-This application generates workflow configurations compatible with
-the Stepflow protocol. For more information about Stepflow, visit:
-https://stepflow.org
-
-The Stepflow source code is available at:
-https://github.com/stepflow-ai/stepflow
-
 ==============================================================================
 
 THIRD-PARTY DEPENDENCIES

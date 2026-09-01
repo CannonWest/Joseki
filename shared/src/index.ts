@@ -1,55 +1,6 @@
 // Shared types and utilities for MaestroAI
 
-// Export Stepflow compatibility layer
-export * from './stepflow';
-export * from './stepflowSchema';
-export * from './stepflowExpressions';
-export * from './stepflowDiscovery';
 export { createExampleWorkflow } from './exampleWorkflow';
-
-// Re-export specific types for convenience
-export type {
-  StepflowWorkflow,
-  StepflowStep,
-  StepflowInputValue,
-  StepflowInputSchema,
-  StepflowBatchSchema,
-  StepflowSchemaProperty,
-  StepflowErrorHandler,
-  StepflowFromReference,
-  StepflowConfig,
-  IdMapping
-} from './stepflow';
-
-export type {
-  ValidatedStepflowWorkflow,
-  ValidatedStepflowConfig,
-  ValidatedStepflowStep,
-  ValidatedStepflowErrorHandler,
-  ValidationResult
-} from './stepflowSchema';
-
-// Export expression types
-export type {
-  StepReference,
-  InputReference,
-  VariableReference,
-  TemplateExpression,
-  LiteralExpression,
-  FromReference,
-  StepflowExpression,
-  EvaluationContext
-} from './stepflowExpressions';
-
-// Export discovery types
-export type {
-  ComponentInfo,
-  ComponentExample,
-  PluginInfo,
-  MCPServerConfig,
-  DiscoveryOptions,
-  ComponentCategory
-} from './stepflowDiscovery';
 
 // ==================== Workflow Types ====================
 
@@ -151,12 +102,19 @@ export interface ModelCompareConfig {
   maxTokens: number;
 }
 
-export type NodeConfig = 
-  | PromptConfig 
-  | BranchConfig 
-  | AggregateConfig 
-  | HumanGateConfig 
+export interface InputConfig {
+  inputType?: string;
+  required?: boolean;
+  description?: string;
+}
+
+export type NodeConfig =
+  | PromptConfig
+  | BranchConfig
+  | AggregateConfig
+  | HumanGateConfig
   | ModelCompareConfig
+  | InputConfig
   | Record<string, never>;
 
 // ==================== Execution Types ====================

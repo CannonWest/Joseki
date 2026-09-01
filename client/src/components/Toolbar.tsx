@@ -6,16 +6,14 @@ interface ToolbarProps {
   isConnected: boolean;
   onToggleChat: () => void;
   showChat: boolean;
-  onOpenStepflow?: () => void;
 }
 
-export function Toolbar({ 
-  onRun, 
-  isRunning, 
-  isConnected, 
+export function Toolbar({
+  onRun,
+  isRunning,
+  isConnected,
   onToggleChat,
-  showChat,
-  onOpenStepflow
+  showChat
 }: ToolbarProps) {
   return (
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
@@ -45,17 +43,6 @@ export function Toolbar({
       >
         Chat
       </button>
-
-      {onOpenStepflow && (
-        <button
-          onClick={onOpenStepflow}
-          className="px-3 py-1.5 text-sm bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-md transition-colors flex items-center gap-1"
-          title="Export/Import Stepflow workflows"
-        >
-          <span>⚡</span>
-          Stepflow
-        </button>
-      )}
 
       <button
         onClick={onRun}

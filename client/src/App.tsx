@@ -40,7 +40,6 @@ import { NodePalette } from './components/NodePalette';
 import { NodeConfigPanel } from './components/NodeConfigPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { Toolbar } from './components/Toolbar';
-import { StepflowPanel } from './components/StepflowPanel';
 import { PromptNode } from './nodes/PromptNode';
 import { BranchNode } from './nodes/BranchNode';
 import { InputNode } from './nodes/InputNode';
@@ -74,7 +73,6 @@ function Flow() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [showChat, setShowChat] = useState(false);
-  const [showStepflow, setShowStepflow] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   
   const flowWrapper = useRef<HTMLDivElement>(null);
@@ -337,7 +335,6 @@ function Flow() {
           isConnected={isConnected}
           onToggleChat={() => setShowChat(!showChat)}
           showChat={showChat}
-          onOpenStepflow={() => setShowStepflow(true)}
         />
         
         <div className="flex-1 flex overflow-hidden">
@@ -469,10 +466,6 @@ function Flow() {
           
           {showChat && (
             <ChatPanel onClose={() => setShowChat(false)} />
-          )}
-          
-          {showStepflow && (
-            <StepflowPanel onClose={() => setShowStepflow(false)} />
           )}
         </div>
       </div>
