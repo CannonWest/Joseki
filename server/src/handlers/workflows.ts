@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import type { Workflow } from '@maestroai/shared';
-import { generateId } from '@maestroai/shared';
+import type { Workflow, WorkflowEdge, WorkflowNode } from '@maestroai/shared';
+import { generateId, validateWorkflow, validateWorkflowStructure } from '@maestroai/shared';
 import { Database } from '../db/database';
 
 const router = Router();
@@ -43,15 +43,74 @@ router.post('/', (req, res) => {
   res.status(201).json(workflow);
 });
 
-// Update workflow
+// Import a workflow file — a bare workflow or an export envelope ({ workflow }).
+// Structural problems are rejected; graph problems come back alongside the
+// created workflow so they can be fixed in the editor. Registered before the
+// /:id routes so "import" is never read as an id.
+router.post('/import', (req, res) => {
+  const db = (req as any).db as Database;
+  const body = req.body;
+  const source: unknown =
+    body && typeof body === 'object' && body.workflow && typeof body.workflow === 'object'
+      ? body.workflow
+      : body;
+
+  const structure = validateWorkflowStructure(source);
+  if (!structure.ok) {
+    return res.status(400).json({ error: 'Invalid workflow file', details: structure.errors });
+  }
+
+  const input = source as {
+    name?: unknown;
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+    variables?: Record<string, any>;
+  };
+  const now = Date.now();
+  const workflow: Workflow = {
+    id: generateId(),
+    name: typeof input.name === 'string' && input.name.trim() ? input.name : 'Imported Workflow',
+    nodes: input.nodes,
+    edges: input.edges,
+    variables: input.variables ?? {},
+    createdAt: now,
+    updatedAt: now
+  };
+
+  db.createWorkflow(workflow);
+  res.status(201).json({ workflow, validation: validateWorkflow(workflow) });
+});
+
+// Update workflow. Creates it when the id is unknown so workflows the client
+// built locally (new / example) can be saved under the id they already have.
 router.put('/:id', (req, res) => {
   const db = (req as any).db as Database;
   const existing = db.getWorkflow(req.params.id);
-  
+
   if (!existing) {
-    return res.status(404).json({ error: 'Workflow not found' });
+    const draft = {
+      nodes: req.body.nodes ?? [],
+      edges: req.body.edges ?? [],
+      variables: req.body.variables
+    };
+    const structure = validateWorkflowStructure(draft);
+    if (!structure.ok) {
+      return res.status(400).json({ error: 'Invalid workflow', details: structure.errors });
+    }
+    const now = Date.now();
+    const created: Workflow = {
+      id: req.params.id,
+      name: req.body.name || 'Untitled Workflow',
+      nodes: draft.nodes,
+      edges: draft.edges,
+      variables: draft.variables ?? {},
+      createdAt: now,
+      updatedAt: now
+    };
+    db.createWorkflow(created);
+    return res.status(201).json(created);
   }
-  
+
   const workflow: Workflow = {
     ...existing,
     name: req.body.name ?? existing.name,
@@ -87,8 +146,20 @@ router.get('/:id/export', (req, res) => {
     workflow,
     executionPlan: buildExecutionPlan(workflow)
   };
-  
+
   res.json(engineFormat);
+});
+
+// Graph-level validation of the stored workflow
+router.post('/:id/validate', (req, res) => {
+  const db = (req as any).db as Database;
+  const workflow = db.getWorkflow(req.params.id);
+
+  if (!workflow) {
+    return res.status(404).json({ error: 'Workflow not found' });
+  }
+
+  res.json(validateWorkflow(workflow));
 });
 
 function buildExecutionPlan(workflow: Workflow) {

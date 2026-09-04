@@ -1,19 +1,26 @@
-import React from 'react';
-
 interface ToolbarProps {
   onRun: () => void;
   isRunning: boolean;
   isConnected: boolean;
   onToggleChat: () => void;
   showChat: boolean;
+  onValidate: () => void;
+  onExport: () => void;
+  onImport: () => void;
 }
+
+const secondaryButton =
+  'px-3 py-1.5 text-sm bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-md transition-colors';
 
 export function Toolbar({
   onRun,
   isRunning,
   isConnected,
   onToggleChat,
-  showChat
+  showChat,
+  onValidate,
+  onExport,
+  onImport
 }: ToolbarProps) {
   return (
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
@@ -33,11 +40,23 @@ export function Toolbar({
 
       <div className="h-6 w-px bg-slate-800" />
 
+      <button onClick={onValidate} className={secondaryButton} title="Check the workflow for problems">
+        Validate
+      </button>
+      <button onClick={onExport} className={secondaryButton} title="Save and download this workflow as JSON">
+        Export
+      </button>
+      <button onClick={onImport} className={secondaryButton} title="Load a workflow from a JSON file">
+        Import
+      </button>
+
+      <div className="h-6 w-px bg-slate-800" />
+
       <button
         onClick={onToggleChat}
         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-          showChat 
-            ? 'bg-blue-600 text-white' 
+          showChat
+            ? 'bg-blue-600 text-white'
             : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
         }`}
       >

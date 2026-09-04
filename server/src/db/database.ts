@@ -1,6 +1,6 @@
 import DatabaseBetter from 'better-sqlite3';
 import type { Workflow, ExecutionTrace, ConversationTree, ModelConfig } from '@maestroai/shared';
-import { createExampleWorkflow } from '@maestroai/shared';
+import { createExampleWorkflow, generateId } from '@maestroai/shared';
 
 export class Database {
   private db: DatabaseBetter.Database;
@@ -258,7 +258,9 @@ export class Database {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
-      trace.runId,
+      // runId is the execution id, shared by every node in the run — it
+      // cannot be this row's primary key.
+      generateId(),
       trace.executionId,
       trace.nodeId,
       JSON.stringify(trace.input),

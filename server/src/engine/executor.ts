@@ -52,12 +52,16 @@ export class WorkflowExecutor {
     // Execute in topological order
     const queue = [...startNodes];
     const nodeMap = new Map(workflow.nodes.map(n => [n.id, n]));
+    // Consecutive nodes deferred with nothing executed in between. Once it
+    // exceeds the queue we have cycled through every waiting node without
+    // progress, so none of them can ever run.
+    let deferrals = 0;
 
     while (queue.length > 0) {
       const nodeId = queue.shift()!;
-      
+
       if (executedNodes.has(nodeId)) continue;
-      
+
       const node = nodeMap.get(nodeId);
       if (!node) continue;
 
@@ -65,19 +69,28 @@ export class WorkflowExecutor {
       const dependencies = workflow.edges
         .filter(e => e.target === nodeId)
         .map(e => e.source);
-      
+
       const depsSatisfied = dependencies.every(dep => executedNodes.has(dep));
       if (!depsSatisfied) {
+        deferrals++;
+        if (deferrals > queue.length) {
+          const stuck = Array.from(new Set([nodeId, ...queue]));
+          throw new Error(
+            `Execution stalled: ${stuck.join(', ')} are waiting on dependencies that will never run ` +
+            `(dependency cycle, or the start node's upstream is outside this run)`
+          );
+        }
         // Put back in queue and try later
         queue.push(nodeId);
         continue;
       }
 
       // Execute node
+      deferrals = 0;
       options.onNodeStart?.(nodeId);
-      
+
       const trace = await this.executeNode(node, context, executionId, options);
-      
+
       context[nodeId] = { output: trace.output, trace };
       executedNodes.add(nodeId);
 
@@ -319,7 +332,7 @@ export class WorkflowExecutor {
           temperature: config.temperature,
           maxTokens: config.maxTokens
         });
-        return { model, ...result };
+        return { ...result, model };
       })
     );
 
@@ -327,8 +340,14 @@ export class WorkflowExecutor {
   }
 
   private buildNodeInput(node: WorkflowNode, context: ExecutionContext): any {
-    // Build input object from context
-    return { nodes: context };
+    // Snapshot of upstream outputs only. The live context holds every node's
+    // trace, and each trace holds its input — keeping the reference would make
+    // the trace circular and unserializable when it is persisted.
+    const nodes: Record<string, any> = {};
+    for (const [id, entry] of Object.entries(context)) {
+      if (id !== node.id) nodes[id] = entry.output;
+    }
+    return { nodes };
   }
 
   private getModelConfig(modelId: string): any {

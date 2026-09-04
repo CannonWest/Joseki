@@ -53,7 +53,34 @@ maestroai/
 1. **Create Workflows**: Drag nodes from the palette onto the canvas
 2. **Connect Nodes**: Connect nodes by dragging between handles
 3. **Configure**: Click nodes to configure prompts and parameters
-4. **Execute**: Press `Cmd+Enter` to run the workflow
+4. **Validate**: Click **Validate** to check for problems before running
+5. **Execute**: Press `Cmd+Enter` to run the workflow (it is saved and validated first)
+6. **Share**: **Export** downloads the workflow as JSON; **Import** loads one from a file or pasted JSON
+
+## Workflow files
+
+**Export** saves the canvas and downloads `<name>.maestro.json`:
+
+```json
+{
+  "version": "1.0.0",
+  "workflow": { "id": "...", "name": "...", "nodes": [...], "edges": [...], "variables": {} },
+  "executionPlan": [ { "nodeId": "...", "dependencies": [...] } ]
+}
+```
+
+**Import** accepts that envelope or a bare `{ "name", "nodes", "edges" }` object. The file must be structurally sound (arrays of nodes/edges, each node with an id, type, position and data); graph problems are reported after import so you can fix them in the editor.
+
+**Validation** flags what the executor cannot run — unknown node types, duplicate ids, edges to missing nodes, dependency cycles — and warns about things that probably won't do what you expect (disconnected nodes, prompts with no model, template references to nodes that don't exist, no input or output node). Running a workflow validates it first; a workflow with errors will not start.
+
+### API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/workflows/:id/export` | GET | Export envelope (workflow + execution plan) |
+| `/api/workflows/import` | POST | Create a workflow from an export envelope or bare workflow |
+| `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
+| `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
 
 ## Keyboard Shortcuts
 
