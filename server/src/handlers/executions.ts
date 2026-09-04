@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateId } from '@maestroai/shared';
+import { generateId, validateWorkflow } from '@maestroai/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
 
@@ -9,11 +9,16 @@ const router = Router();
 router.post('/:workflowId', async (req, res) => {
   const db = (req as any).db as Database;
   const workflow = db.getWorkflow(req.params.workflowId);
-  
+
   if (!workflow) {
     return res.status(404).json({ error: 'Workflow not found' });
   }
-  
+
+  const validation = validateWorkflow(workflow);
+  if (!validation.valid) {
+    return res.status(400).json({ error: 'Workflow is not runnable', validation });
+  }
+
   const executionId = generateId();
   const startNodeId = req.body.startNodeId;
   const context = req.body.context || {};

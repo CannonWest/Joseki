@@ -40,6 +40,8 @@ import { NodePalette } from './components/NodePalette';
 import { NodeConfigPanel } from './components/NodeConfigPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { Toolbar } from './components/Toolbar';
+import { ValidationPanel } from './components/ValidationPanel';
+import { ImportModal } from './components/ImportModal';
 import { PromptNode } from './nodes/PromptNode';
 import { BranchNode } from './nodes/BranchNode';
 import { InputNode } from './nodes/InputNode';
@@ -47,7 +49,8 @@ import { OutputNode } from './nodes/OutputNode';
 import { AggregateNode } from './nodes/AggregateNode';
 import { HumanGateNode } from './nodes/HumanGateNode';
 import { ModelCompareNode } from './nodes/ModelCompareNode';
-import { createExampleWorkflow } from '@maestroai/shared';
+import { createExampleWorkflow, validateWorkflow } from '@maestroai/shared';
+import type { NodeType, Workflow, WorkflowValidation } from '@maestroai/shared';
 
 const nodeTypes = {
   prompt: PromptNode,
@@ -67,18 +70,20 @@ interface SelectionBox {
   isSelecting: boolean;
 }
 
-function Flow() {
+function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [showChat, setShowChat] = useState(false);
+  const [validation, setValidation] = useState<WorkflowValidation | null>(null);
+  const [showImport, setShowImport] = useState(openImportOnMount);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   
   const flowWrapper = useRef<HTMLDivElement>(null);
   const { project } = useReactFlow();
   
-  const { currentWorkflow } = useWorkflowStore();
+  const { currentWorkflow, setCurrentWorkflow, persistWorkflow } = useWorkflowStore();
   const { isExecuting, startExecution } = useExecutionStore();
   const { socket, isConnected } = useSocket();
 
@@ -217,19 +222,98 @@ function Flow() {
     }
   }, [selectedEdge, setEdges]);
 
-  const handleRun = useCallback(() => {
-    if (!currentWorkflow || !socket) return;
-    
+  // The canvas (React Flow state) is the source of truth for nodes and edges;
+  // the store's currentWorkflow only carries identity and metadata.
+  const canvasWorkflow = useCallback((): Workflow | null => {
+    if (!currentWorkflow) return null;
+    return {
+      ...currentWorkflow,
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        type: n.type as NodeType,
+        position: n.position,
+        data: n.data
+      })),
+      edges: edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined
+      })),
+      updatedAt: Date.now()
+    };
+  }, [currentWorkflow, nodes, edges]);
+
+  const showFailure = useCallback((error: unknown) => {
+    setValidation({
+      valid: false,
+      errors: [error instanceof Error ? error.message : String(error)],
+      warnings: []
+    });
+  }, []);
+
+  const handleValidate = useCallback(() => {
+    const workflow = canvasWorkflow();
+    if (!workflow) return;
+    setValidation(validateWorkflow(workflow));
+  }, [canvasWorkflow]);
+
+  const handleExport = useCallback(async () => {
+    const workflow = canvasWorkflow();
+    if (!workflow) return;
+    try {
+      const saved = await persistWorkflow(workflow);
+      const response = await fetch(`/api/workflows/${saved.id}/export`);
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${saved.name.replace(/[^\w.-]+/g, '_') || 'workflow'}.maestro.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      showFailure(error);
+    }
+  }, [canvasWorkflow, persistWorkflow, showFailure]);
+
+  const handleImported = useCallback((workflow: Workflow, result: WorkflowValidation) => {
+    setShowImport(false);
+    setCurrentWorkflow(workflow);
+    setValidation(result.errors.length || result.warnings.length ? result : null);
+  }, [setCurrentWorkflow]);
+
+  const handleRun = useCallback(async () => {
+    const workflow = canvasWorkflow();
+    if (!workflow || !socket) return;
+
+    const result = validateWorkflow(workflow);
+    if (!result.valid) {
+      setValidation(result);
+      return;
+    }
+
+    // The server executes its stored copy, so the canvas must be saved first.
+    try {
+      await persistWorkflow(workflow);
+    } catch (error) {
+      showFailure(error);
+      return;
+    }
+
     const executionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     startExecution(executionId);
-    
+
     socket.emit('execution:start', {
-      workflowId: currentWorkflow.id,
+      workflowId: workflow.id,
       executionId
     });
-    
+
     setShowChat(true);
-  }, [currentWorkflow, socket, startExecution]);
+  }, [canvasWorkflow, socket, persistWorkflow, showFailure, startExecution]);
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -335,6 +419,9 @@ function Flow() {
           isConnected={isConnected}
           onToggleChat={() => setShowChat(!showChat)}
           showChat={showChat}
+          onValidate={handleValidate}
+          onExport={handleExport}
+          onImport={() => setShowImport(true)}
         />
         
         <div className="flex-1 flex overflow-hidden">
@@ -469,6 +556,13 @@ function Flow() {
           )}
         </div>
       </div>
+
+      {validation && (
+        <ValidationPanel result={validation} onClose={() => setValidation(null)} />
+      )}
+      {showImport && (
+        <ImportModal onClose={() => setShowImport(false)} onImported={handleImported} />
+      )}
     </div>
   );
 }
@@ -476,6 +570,7 @@ function Flow() {
 function App() {
   const { loadWorkflows, workflows, setCurrentWorkflow } = useWorkflowStore();
   const [showWelcome, setShowWelcome] = useState(true);
+  const [importOnStart, setImportOnStart] = useState(false);
 
   useEffect(() => {
     loadWorkflows();
@@ -493,6 +588,13 @@ function App() {
     };
     setCurrentWorkflow(newWorkflow);
     setShowWelcome(false);
+  };
+
+  // Opens the editor on an empty workflow with the import dialog already up;
+  // a successful import replaces the placeholder.
+  const handleImportWorkflow = () => {
+    setImportOnStart(true);
+    handleCreateWorkflow();
   };
 
   const handleLoadWorkflow = (workflow: any) => {
@@ -513,7 +615,7 @@ function App() {
           <h1 className="text-4xl font-bold text-white mb-2">MaestroAI</h1>
           <p className="text-slate-400 mb-8">Visual IDE for conversational AI workflows</p>
           
-          <div className="grid grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-2 gap-4 mb-8">
             <button
               onClick={handleCreateWorkflow}
               className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left"
@@ -543,6 +645,15 @@ function App() {
                 {workflows.length} workflow{workflows.length !== 1 ? 's' : ''}
               </div>
             </button>
+
+            <button
+              onClick={handleImportWorkflow}
+              className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left"
+            >
+              <div className="text-2xl mb-2">⇪</div>
+              <div className="font-semibold text-white">Import Workflow</div>
+              <div className="text-sm text-slate-400">From a MaestroAI JSON export</div>
+            </button>
           </div>
           
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
@@ -561,7 +672,7 @@ function App() {
 
   return (
     <ReactFlowProvider>
-      <Flow />
+      <Flow openImportOnMount={importOnStart} />
     </ReactFlowProvider>
   );
 }

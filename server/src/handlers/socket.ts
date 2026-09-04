@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import { validateWorkflow } from '@maestroai/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
 
@@ -27,6 +28,16 @@ export function setupSocketHandlers(io: Server, db: Database) {
         return;
       }
 
+      const validation = validateWorkflow(workflow);
+      if (!validation.valid) {
+        socket.emit('execution:error', {
+          executionId,
+          error: `Workflow is not runnable: ${validation.errors.join('; ')}`,
+          validation
+        });
+        return;
+      }
+
       // Create execution record
       db.createExecution({
         id: executionId,
@@ -36,9 +47,11 @@ export function setupSocketHandlers(io: Server, db: Database) {
         startedAt: Date.now()
       });
 
-      const executor = new WorkflowExecutor(db);
-
       try {
+        // Constructed inside the try: the LLM adapter throws when no API key
+        // is configured, and that must surface as an execution error rather
+        // than an unhandled rejection.
+        const executor = new WorkflowExecutor(db);
         await executor.execute(workflow, executionId, {
           startNodeId,
           context,

@@ -1,6 +1,7 @@
 // Shared types and utilities for MaestroAI
 
 export { createExampleWorkflow } from './exampleWorkflow';
+export * from './validate';
 
 // ==================== Workflow Types ====================
 
