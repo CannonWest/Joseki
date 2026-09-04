@@ -276,6 +276,33 @@ test('chatStream ends with what streamed so far when the signal is aborted', asy
   ]);
 });
 
+test('chatStream marks the reply cancelled when the SDK ends an aborted stream quietly', async () => {
+  // openai-node swallows the AbortError and just stops iterating.
+  const controller = new AbortController();
+  const client: CompletionsClient = {
+    chat: {
+      completions: {
+        async create(_body, options) {
+          return (async function* () {
+            yield { choices: [{ delta: { content: 'partial' } }] };
+            controller.abort();
+            if (options?.signal?.aborted) return;
+            yield { choices: [{ delta: { content: ' more' } }] };
+          })();
+        }
+      }
+    }
+  };
+  const provider = new OpenRouterProvider({ apiKey: 'test', client });
+
+  const events = await collect(provider.chatStream({ model: 'm', messages: [] }, { signal: controller.signal }));
+  const done = events[events.length - 1];
+  assert.equal(done.type, 'done');
+  if (done.type !== 'done') return;
+  assert.equal(done.result.content, 'partial');
+  assert.equal(done.result.finishReason, 'cancelled');
+});
+
 test('chat wraps API failures in a ProviderError that keeps the status', async () => {
   const client: CompletionsClient = {
     chat: {

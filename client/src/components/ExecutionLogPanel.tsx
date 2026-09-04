@@ -1,12 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useExecutionStore } from '../stores/executionStore';
 
-interface ChatPanelProps {
+interface ExecutionLogPanelProps {
   onClose: () => void;
 }
 
-export function ChatPanel({ onClose }: ChatPanelProps) {
-  const { logs, nodeStates, isExecuting } = useExecutionStore();
+// Node events and streamed prompt output for the run in progress
+export function ExecutionLogPanel({ onClose }: ExecutionLogPanelProps) {
+  const { logs, nodeStates } = useExecutionStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,21 +62,6 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         ))}
 
         <div ref={scrollRef} />
-      </div>
-
-      <div className="h-12 border-t border-slate-800 flex items-center px-4 gap-2">
-        <input
-          type="text"
-          placeholder="Send message..."
-          className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-          disabled={!isExecuting}
-        />
-        <button
-          disabled={!isExecuting}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white text-sm rounded transition-colors"
-        >
-          Send
-        </button>
       </div>
     </div>
   );

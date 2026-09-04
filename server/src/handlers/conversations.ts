@@ -29,7 +29,11 @@ export function conversationRoutes(db: Database, chat: ChatService): Router {
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
-    res.json({ ...conversation, messages: db.getMessages(conversation.id) });
+    res.json({
+      ...conversation,
+      messages: db.getMessages(conversation.id),
+      generating: chat.isGenerating(conversation.id)
+    });
   });
 
   // Update title / model / system prompt / params, or move the active leaf

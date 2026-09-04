@@ -86,6 +86,8 @@ maestroai/
 
 The server holds multi-turn conversations against any model on [OpenRouter](https://openrouter.ai), streaming replies over socket.io and storing every message in SQLite. Set `OPENROUTER_API_KEY` to enable it; without a key the workflow editor works as before and the chat routes answer `503`.
 
+The client's **Chat** view (the Chat card on the welcome screen, or the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and per-reply usage and cost, a searchable model picker over the catalog, and per-conversation settings (model, system prompt, temperature, max tokens).
+
 Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model.
 
 ### API
@@ -94,7 +96,7 @@ Messages form a tree: each message records its parent, so a conversation can bra
 |----------|--------|-------------|
 | `/api/conversations` | GET | List conversations, most recently active first |
 | `/api/conversations` | POST | Create — `{ title?, model?, systemPrompt?, params? }` |
-| `/api/conversations/:id` | GET | The conversation with its whole message tree |
+| `/api/conversations/:id` | GET | The conversation with its whole message tree; `generating: true` while a reply is streaming |
 | `/api/conversations/:id` | PATCH | Update title / model / system prompt / params, or move `activeLeafId` |
 | `/api/conversations/:id` | DELETE | Delete the conversation and its messages |
 | `/api/models` | GET | The OpenRouter catalog (`?q=` searches it, `?refresh=1` bypasses the 5-minute cache) |

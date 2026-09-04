@@ -38,7 +38,8 @@ import { useExecutionStore } from './stores/executionStore';
 import { useSocket } from './hooks/useSocket';
 import { NodePalette } from './components/NodePalette';
 import { NodeConfigPanel } from './components/NodeConfigPanel';
-import { ChatPanel } from './components/ChatPanel';
+import { ExecutionLogPanel } from './components/ExecutionLogPanel';
+import { ChatView } from './components/chat/ChatView';
 import { Toolbar } from './components/Toolbar';
 import { ValidationPanel } from './components/ValidationPanel';
 import { ImportModal } from './components/ImportModal';
@@ -70,12 +71,18 @@ interface SelectionBox {
   isSelecting: boolean;
 }
 
-function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
+function Flow({
+  openImportOnMount = false,
+  onOpenChat
+}: {
+  openImportOnMount?: boolean;
+  onOpenChat: () => void;
+}) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
-  const [showChat, setShowChat] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
   const [showImport, setShowImport] = useState(openImportOnMount);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -312,8 +319,16 @@ function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
       executionId
     });
 
-    setShowChat(true);
+    setShowLog(true);
   }, [canvasWorkflow, socket, persistWorkflow, showFailure, startExecution]);
+
+  // Hand unsaved canvas edits to the store before leaving for the chat view,
+  // so they are still there when the editor comes back.
+  const handleOpenChat = useCallback(() => {
+    const workflow = canvasWorkflow();
+    if (workflow) setCurrentWorkflow(workflow);
+    onOpenChat();
+  }, [canvasWorkflow, setCurrentWorkflow, onOpenChat]);
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -417,8 +432,9 @@ function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
           onRun={handleRun}
           isRunning={isExecuting}
           isConnected={isConnected}
-          onToggleChat={() => setShowChat(!showChat)}
-          showChat={showChat}
+          onToggleLog={() => setShowLog(!showLog)}
+          showLog={showLog}
+          onOpenChat={handleOpenChat}
           onValidate={handleValidate}
           onExport={handleExport}
           onImport={() => setShowImport(true)}
@@ -551,8 +567,8 @@ function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
             />
           )}
           
-          {showChat && (
-            <ChatPanel onClose={() => setShowChat(false)} />
+          {showLog && (
+            <ExecutionLogPanel onClose={() => setShowLog(false)} />
           )}
         </div>
       </div>
@@ -568,8 +584,8 @@ function Flow({ openImportOnMount = false }: { openImportOnMount?: boolean }) {
 }
 
 function App() {
-  const { loadWorkflows, workflows, setCurrentWorkflow } = useWorkflowStore();
-  const [showWelcome, setShowWelcome] = useState(true);
+  const { loadWorkflows, workflows, setCurrentWorkflow, currentWorkflow } = useWorkflowStore();
+  const [view, setView] = useState<'welcome' | 'canvas' | 'chat'>('welcome');
   const [importOnStart, setImportOnStart] = useState(false);
 
   useEffect(() => {
@@ -587,7 +603,7 @@ function App() {
       updatedAt: Date.now()
     };
     setCurrentWorkflow(newWorkflow);
-    setShowWelcome(false);
+    setView('canvas');
   };
 
   // Opens the editor on an empty workflow with the import dialog already up;
@@ -599,16 +615,20 @@ function App() {
 
   const handleLoadWorkflow = (workflow: any) => {
     setCurrentWorkflow(workflow);
-    setShowWelcome(false);
+    setView('canvas');
   };
 
   const handleLoadExample = () => {
     const exampleWorkflow = createExampleWorkflow();
     setCurrentWorkflow(exampleWorkflow);
-    setShowWelcome(false);
+    setView('canvas');
   };
 
-  if (showWelcome) {
+  if (view === 'chat') {
+    return <ChatView onOpenWorkflows={() => setView(currentWorkflow ? 'canvas' : 'welcome')} />;
+  }
+
+  if (view === 'welcome') {
     return (
       <div className="h-screen w-full bg-slate-950 flex items-center justify-center">
         <div className="max-w-2xl w-full mx-4">
@@ -654,6 +674,15 @@ function App() {
               <div className="font-semibold text-white">Import Workflow</div>
               <div className="text-sm text-slate-400">From a MaestroAI JSON export</div>
             </button>
+
+            <button
+              onClick={() => setView('chat')}
+              className="col-span-2 p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-purple-500 transition-colors text-left"
+            >
+              <div className="text-2xl mb-2">💬</div>
+              <div className="font-semibold text-white">Chat</div>
+              <div className="text-sm text-slate-400">Talk to any model on OpenRouter, outside a workflow</div>
+            </button>
           </div>
           
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
@@ -672,7 +701,13 @@ function App() {
 
   return (
     <ReactFlowProvider>
-      <Flow openImportOnMount={importOnStart} />
+      <Flow
+        openImportOnMount={importOnStart}
+        onOpenChat={() => {
+          setImportOnStart(false);
+          setView('chat');
+        }}
+      />
     </ReactFlowProvider>
   );
 }

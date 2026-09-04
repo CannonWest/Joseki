@@ -2,6 +2,7 @@
 
 export { createExampleWorkflow } from './exampleWorkflow';
 export * from './validate';
+export * from './chat';
 
 // ==================== Workflow Types ====================
 
@@ -273,6 +274,8 @@ export interface ChatMessage {
 
 export interface ConversationDetail extends Conversation {
   messages: ChatMessage[];
+  /** A reply is being generated right now; socket events will follow. */
+  generating?: boolean;
 }
 
 /** A model from the OpenRouter catalog. Prices are USD per million tokens. */

@@ -2,8 +2,9 @@ interface ToolbarProps {
   onRun: () => void;
   isRunning: boolean;
   isConnected: boolean;
-  onToggleChat: () => void;
-  showChat: boolean;
+  onToggleLog: () => void;
+  showLog: boolean;
+  onOpenChat: () => void;
   onValidate: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -16,8 +17,9 @@ export function Toolbar({
   onRun,
   isRunning,
   isConnected,
-  onToggleChat,
-  showChat,
+  onToggleLog,
+  showLog,
+  onOpenChat,
   onValidate,
   onExport,
   onImport
@@ -52,15 +54,20 @@ export function Toolbar({
 
       <div className="h-6 w-px bg-slate-800" />
 
+      <button onClick={onOpenChat} className={secondaryButton} title="Chat with any model on OpenRouter">
+        Chat
+      </button>
+
       <button
-        onClick={onToggleChat}
+        onClick={onToggleLog}
         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-          showChat
+          showLog
             ? 'bg-blue-600 text-white'
             : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
         }`}
+        title="Show the execution log"
       >
-        Chat
+        Log
       </button>
 
       <button

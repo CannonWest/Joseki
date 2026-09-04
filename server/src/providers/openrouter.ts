@@ -269,12 +269,11 @@ export class OpenRouterProvider {
         }
       }
     } catch (error) {
-      if (options.signal?.aborted) {
-        finishReason = 'cancelled';
-      } else {
-        throw toProviderError(error);
-      }
+      if (!options.signal?.aborted) throw toProviderError(error);
     }
+    // The SDK ends an aborted stream quietly rather than throwing, so the
+    // signal — not the catch — is what marks the reply cancelled.
+    if (options.signal?.aborted) finishReason = 'cancelled';
 
     const { tokenUsage, cost } = extractUsage(usage);
     const result: ChatResult = { content, model, tokenUsage, cost, finishReason };
