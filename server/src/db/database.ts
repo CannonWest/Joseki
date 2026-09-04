@@ -1,6 +1,16 @@
 import DatabaseBetter from 'better-sqlite3';
-import type { Workflow, ExecutionTrace, ConversationTree, ModelConfig } from '@maestroai/shared';
+import type {
+  Workflow,
+  ExecutionTrace,
+  ModelConfig,
+  Conversation,
+  ChatMessage
+} from '@maestroai/shared';
 import { createExampleWorkflow, generateId } from '@maestroai/shared';
+
+export type ConversationPatch = Partial<
+  Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'params' | 'activeLeafId'>
+>;
 
 export class Database {
   private db: DatabaseBetter.Database;
@@ -57,19 +67,47 @@ export class Database {
       )
     `);
 
-    // Conversation trees table
+    // Chat conversations. Messages form a tree through parent_id — siblings
+    // are alternative branches — and the conversation tracks the leaf of the
+    // branch in view. Replaces the never-populated conversation_trees table.
+    this.db.exec(`DROP TABLE IF EXISTS conversation_trees`);
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS conversation_trees (
+      CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
-        workflow_id TEXT NOT NULL,
-        execution_id TEXT NOT NULL,
-        root_id TEXT NOT NULL,
-        nodes TEXT NOT NULL,
+        title TEXT NOT NULL,
+        model TEXT NOT NULL,
+        system_prompt TEXT,
+        params TEXT NOT NULL,
+        active_leaf_id TEXT,
         created_at INTEGER NOT NULL,
-        FOREIGN KEY (workflow_id) REFERENCES workflows(id),
-        FOREIGN KEY (execution_id) REFERENCES executions(id)
+        updated_at INTEGER NOT NULL
       )
     `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        parent_id TEXT,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model TEXT,
+        token_usage TEXT,
+        cost REAL,
+        latency_ms INTEGER,
+        finish_reason TEXT,
+        reasoning TEXT,
+        tool_calls TEXT,
+        tool_call_id TEXT,
+        error TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+        FOREIGN KEY (parent_id) REFERENCES messages(id)
+      )
+    `);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at)
+    `);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)`);
 
     // Model configs table
     this.db.exec(`
@@ -286,6 +324,167 @@ export class Database {
       pricing: JSON.parse(row.pricing),
       capabilities: JSON.parse(row.capabilities)
     }));
+  }
+
+  // Conversation operations
+  createConversation(conversation: Conversation): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO conversations
+      (id, title, model, system_prompt, params, active_leaf_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      conversation.id,
+      conversation.title,
+      conversation.model,
+      conversation.systemPrompt,
+      JSON.stringify(conversation.params),
+      conversation.activeLeafId,
+      conversation.createdAt,
+      conversation.updatedAt
+    );
+  }
+
+  getConversation(id: string): Conversation | undefined {
+    const row = this.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as any;
+    if (!row) return undefined;
+    return this.parseConversation(row);
+  }
+
+  getAllConversations(): Conversation[] {
+    const rows = this.db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC').all() as any[];
+    return rows.map(row => this.parseConversation(row));
+  }
+
+  // Applies the given fields and bumps updated_at
+  updateConversation(id: string, patch: ConversationPatch): Conversation | undefined {
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    if (patch.title !== undefined) {
+      assignments.push('title = ?');
+      values.push(patch.title);
+    }
+    if (patch.model !== undefined) {
+      assignments.push('model = ?');
+      values.push(patch.model);
+    }
+    if (patch.systemPrompt !== undefined) {
+      assignments.push('system_prompt = ?');
+      values.push(patch.systemPrompt);
+    }
+    if (patch.params !== undefined) {
+      assignments.push('params = ?');
+      values.push(JSON.stringify(patch.params));
+    }
+    if (patch.activeLeafId !== undefined) {
+      assignments.push('active_leaf_id = ?');
+      values.push(patch.activeLeafId);
+    }
+    assignments.push('updated_at = ?');
+    values.push(Date.now());
+
+    this.db
+      .prepare(`UPDATE conversations SET ${assignments.join(', ')} WHERE id = ?`)
+      .run(...values, id);
+    return this.getConversation(id);
+  }
+
+  deleteConversation(id: string): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(id);
+      this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
+    })();
+  }
+
+  private parseConversation(row: any): Conversation {
+    return {
+      id: row.id,
+      title: row.title,
+      model: row.model,
+      systemPrompt: row.system_prompt ?? null,
+      params: JSON.parse(row.params),
+      activeLeafId: row.active_leaf_id ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  // Message operations
+  createMessage(message: ChatMessage): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO messages
+      (id, conversation_id, parent_id, role, content, model, token_usage, cost, latency_ms,
+       finish_reason, reasoning, tool_calls, tool_call_id, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      message.id,
+      message.conversationId,
+      message.parentId,
+      message.role,
+      message.content,
+      message.model ?? null,
+      message.tokenUsage ? JSON.stringify(message.tokenUsage) : null,
+      message.cost ?? null,
+      message.latencyMs ?? null,
+      message.finishReason ?? null,
+      message.reasoning ?? null,
+      message.toolCalls ? JSON.stringify(message.toolCalls) : null,
+      message.toolCallId ?? null,
+      message.error ?? null,
+      message.createdAt
+    );
+  }
+
+  getMessage(id: string): ChatMessage | undefined {
+    const row = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as any;
+    if (!row) return undefined;
+    return this.parseMessage(row);
+  }
+
+  // Every message in the conversation, oldest first
+  getMessages(conversationId: string): ChatMessage[] {
+    const rows = this.db
+      .prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid')
+      .all(conversationId) as any[];
+    return rows.map(row => this.parseMessage(row));
+  }
+
+  // The branch in view, root first. Empty when the conversation has no active leaf.
+  getActivePath(conversationId: string): ChatMessage[] {
+    const rows = this.db.prepare(`
+      WITH RECURSIVE path(id, depth) AS (
+        SELECT active_leaf_id, 0 FROM conversations
+        WHERE id = ? AND active_leaf_id IS NOT NULL
+        UNION ALL
+        SELECT m.parent_id, path.depth + 1 FROM messages m
+        JOIN path ON m.id = path.id
+        WHERE m.parent_id IS NOT NULL
+      )
+      SELECT m.* FROM messages m JOIN path ON m.id = path.id ORDER BY path.depth DESC
+    `).all(conversationId) as any[];
+    return rows.map(row => this.parseMessage(row));
+  }
+
+  private parseMessage(row: any): ChatMessage {
+    const message: ChatMessage = {
+      id: row.id,
+      conversationId: row.conversation_id,
+      parentId: row.parent_id ?? null,
+      role: row.role,
+      content: row.content,
+      createdAt: row.created_at
+    };
+    if (row.model != null) message.model = row.model;
+    if (row.token_usage != null) message.tokenUsage = JSON.parse(row.token_usage);
+    if (row.cost != null) message.cost = row.cost;
+    if (row.latency_ms != null) message.latencyMs = row.latency_ms;
+    if (row.finish_reason != null) message.finishReason = row.finish_reason;
+    if (row.reasoning != null) message.reasoning = row.reasoning;
+    if (row.tool_calls != null) message.toolCalls = JSON.parse(row.tool_calls);
+    if (row.tool_call_id != null) message.toolCallId = row.tool_call_id;
+    if (row.error != null) message.error = row.error;
+    return message;
   }
 
   close(): void {

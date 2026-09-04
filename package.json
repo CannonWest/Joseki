@@ -14,6 +14,7 @@
     "db:init": "cd server && npm run db:init",
     "db:migrate": "cd server && npm run db:migrate",
     "install:all": "npm install && cd shared && npm install && cd ../server && npm install && cd ../client && npm install",
+    "test": "cd shared && npm test && cd ../server && npm test",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit"
   },

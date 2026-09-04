@@ -82,6 +82,43 @@ maestroai/
 | `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
 | `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
 
+## Chat
+
+The server holds multi-turn conversations against any model on [OpenRouter](https://openrouter.ai), streaming replies over socket.io and storing every message in SQLite. Set `OPENROUTER_API_KEY` to enable it; without a key the workflow editor works as before and the chat routes answer `503`.
+
+Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model.
+
+### API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/conversations` | GET | List conversations, most recently active first |
+| `/api/conversations` | POST | Create — `{ title?, model?, systemPrompt?, params? }` |
+| `/api/conversations/:id` | GET | The conversation with its whole message tree |
+| `/api/conversations/:id` | PATCH | Update title / model / system prompt / params, or move `activeLeafId` |
+| `/api/conversations/:id` | DELETE | Delete the conversation and its messages |
+| `/api/models` | GET | The OpenRouter catalog (`?q=` searches it, `?refresh=1` bypasses the 5-minute cache) |
+| `/health` | GET | Includes `chat: { configured, defaultModel }` |
+
+`params` are the generation settings for the conversation: `temperature`, `maxTokens`, `topP`, `frequencyPenalty`, `presencePenalty`, `stop`.
+
+### Socket events
+
+Send `chat:send` with `{ conversationId, content, parentId?, model?, params? }`. The reply streams back to everyone in the conversation's room (join with `chat:join`):
+
+| Event | Payload |
+|-------|---------|
+| `chat:message` | `{ conversationId, message }` — the stored user message |
+| `chat:start` | `{ conversationId, messageId, parentId, model }` |
+| `chat:token` | `{ conversationId, messageId, token }` |
+| `chat:reasoning` | `{ conversationId, messageId, text }` — thinking-model traces |
+| `chat:complete` | `{ conversationId, message }` — the stored assistant message, with token usage, cost and latency |
+| `chat:error` | `{ conversationId, error, messageId?, message? }` |
+
+`chat:cancel` with `{ conversationId }` stops a reply in progress; what streamed so far is kept.
+
+Try it end to end with a running server: `npm run smoke:chat --prefix server`.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -95,8 +132,10 @@ maestroai/
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENAI_API_KEY` | OpenAI API key (workflow prompt nodes) |
 | `ANTHROPIC_API_KEY` | Anthropic API key (optional) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (chat) |
+| `OPENROUTER_DEFAULT_MODEL` | Model for new conversations (default: `openai/gpt-4o-mini`) |
 | `DATABASE_PATH` | SQLite database path |
 | `PORT` | Server port (default: 3001) |
 | `CLIENT_URL` | Frontend URL for CORS |
