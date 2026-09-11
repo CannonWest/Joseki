@@ -37,6 +37,19 @@ export function formatPerMillion(price: number | null): string {
   return `$${price >= 10 ? price.toFixed(0) : price.toFixed(1)}`;
 }
 
+export function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** JSON text re-indented for reading; anything else as it came. */
+export function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
 export function relativeTime(timestamp: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
   if (seconds < 60) return 'just now';

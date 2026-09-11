@@ -54,6 +54,19 @@ export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettin
           </button>
         </div>
 
+        <label className="flex items-center justify-between gap-3 cursor-pointer">
+          <span>
+            <span className="block text-sm text-slate-200">Tools</span>
+            <span className="block text-xs text-slate-500">Let the model run workflows and the built-in tools</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={conversation.params.tools !== false}
+            onChange={(event) => onChange({ params: { tools: event.target.checked } })}
+            className="h-4 w-4 accent-blue-500"
+          />
+        </label>
+
         <div>
           <label className="block text-xs text-slate-400 mb-1">System prompt</label>
           <textarea

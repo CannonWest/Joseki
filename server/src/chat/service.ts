@@ -7,6 +7,8 @@ import type {
   ChatSendRequest,
   ChatStartEvent,
   ChatTokenEvent,
+  ChatToolEndEvent,
+  ChatToolStartEvent,
   Conversation
 } from '@maestroai/shared';
 import { generateId } from '@maestroai/shared';
@@ -18,6 +20,8 @@ import {
   type ChatResult,
   type ChatStreamEvent
 } from '../providers/openrouter';
+import { ToolRegistry } from '../tools/registry';
+import { capForDisplay, capForStorage, runToolLoop } from '../tools/orchestrator';
 
 export const DEFAULT_CONVERSATION_TITLE = 'New conversation';
 export const DEFAULT_CHAT_PARAMS: ChatParams = { temperature: 0.7, maxTokens: 4096 };
@@ -39,11 +43,14 @@ export interface ChatProvider {
 }
 
 export interface ChatEvents {
-  /** The user's message, once stored. */
-  onUserMessage?(message: ChatMessage): void;
+  /** A message stored during the turn: the user's, an assistant turn that called tools, or a tool result. */
+  onMessage?(message: ChatMessage): void;
+  /** A provider call is starting; one per loop iteration, each with its own message id. */
   onStart?(event: ChatStartEvent): void;
   onToken?(event: ChatTokenEvent): void;
   onReasoning?(event: ChatReasoningEvent): void;
+  onToolStart?(event: ChatToolStartEvent): void;
+  onToolEnd?(event: ChatToolEndEvent): void;
   onComplete?(event: ChatCompleteEvent): void;
   /** The generation failed; the stored assistant message carries the error. */
   onError?(event: ChatErrorEvent): void;
@@ -56,22 +63,27 @@ export interface CreateConversationInput {
   params?: ChatParams;
 }
 
+const NO_TOOLS = new ToolRegistry();
+
 /**
  * Multi-turn chat over the conversation tree. A turn stores the user message
- * under the active leaf (or an explicit parent), streams the reply from the
- * provider, stores the assistant message and moves the active leaf to it —
- * so a reload from the database shows exactly what was streamed.
+ * under the active leaf (or an explicit parent), runs the tool loop — plain
+ * chat when no tools apply — storing each assistant tool turn and tool result
+ * as it happens, then stores the final reply and moves the active leaf to it.
+ * A reload from the database shows exactly what was streamed.
  */
 export class ChatService {
   private readonly inFlight = new Map<string, AbortController>();
   private readonly defaultModel: string;
+  private readonly tools: ToolRegistry;
 
   constructor(
     private readonly db: Database,
     private readonly provider: ChatProvider | null,
-    options: { defaultModel?: string } = {}
+    options: { defaultModel?: string; tools?: ToolRegistry } = {}
   ) {
     this.defaultModel = options.defaultModel || DEFAULT_CHAT_MODEL;
+    this.tools = options.tools ?? NO_TOOLS;
   }
 
   isConfigured(): boolean {
@@ -99,8 +111,8 @@ export class ChatService {
   }
 
   /**
-   * Run one turn. Resolves with the stored assistant message — including when
-   * the generation failed (see `message.error`) or was cancelled. Throws a
+   * Run one turn. Resolves with the stored final assistant message — including
+   * when the generation failed (see `message.error`) or was cancelled. Throws a
    * ChatError only when the turn cannot start.
    */
   async send(request: ChatSendRequest, events: ChatEvents = {}): Promise<ChatMessage> {
@@ -130,14 +142,16 @@ export class ChatService {
       parentId = parent.id;
     }
 
+    const conversationId = conversation.id;
     const model = request.model?.trim() || conversation.model;
     const params: ChatParams = { ...conversation.params, ...(request.params ?? {}) };
+    const registry = params.tools === false ? NO_TOOLS : this.tools;
 
     // Store the user's message and make it the active leaf before calling out,
     // so the history is on disk whatever happens next.
     const userMessage: ChatMessage = {
       id: generateId(),
-      conversationId: conversation.id,
+      conversationId,
       parentId,
       role: 'user',
       content,
@@ -145,86 +159,124 @@ export class ChatService {
     };
     this.db.createMessage(userMessage);
     const isFirstMessage = conversation.activeLeafId === null;
-    this.db.updateConversation(conversation.id, {
+    this.db.updateConversation(conversationId, {
       activeLeafId: userMessage.id,
       ...(isFirstMessage && conversation.title === DEFAULT_CONVERSATION_TITLE
         ? { title: deriveTitle(content) }
         : {})
     });
-    emit(events.onUserMessage, userMessage);
+    emit(events.onMessage, userMessage);
 
-    const history = this.db.getActivePath(conversation.id);
+    const history = this.db.getActivePath(conversationId);
     const wire = toWireMessages(history, conversation.systemPrompt);
 
-    const assistantId = generateId();
-    emit(events.onStart, {
-      conversationId: conversation.id,
-      messageId: assistantId,
-      parentId: userMessage.id,
-      model
-    });
-
     const controller = new AbortController();
-    this.inFlight.set(conversation.id, controller);
+    this.inFlight.set(conversationId, controller);
     const startedAt = Date.now();
+    let leafId = userMessage.id;
+    let currentId = generateId();
+    let turnStartedAt = startedAt;
     let streamed = '';
-    let result: ChatResult | undefined;
+    let final: ChatResult | undefined;
     let error: string | undefined;
 
+    // Intermediate messages (tool turns, tool results) land in the tree as
+    // they happen, each becoming the new leaf.
+    const store = (message: ChatMessage) => {
+      this.db.createMessage(message);
+      this.db.updateConversation(conversationId, { activeLeafId: message.id });
+      leafId = message.id;
+      emit(events.onMessage, message);
+    };
+
     try {
-      const stream = this.provider.chatStream(
+      const loop = runToolLoop(
+        this.provider,
+        registry,
         { model, messages: wire, params },
-        { signal: controller.signal }
+        {
+          context: { db: this.db, conversationId, signal: controller.signal },
+          signal: controller.signal
+        }
       );
-      for await (const event of stream) {
-        if (event.type === 'token') {
-          streamed += event.text;
-          emit(events.onToken, { conversationId: conversation.id, messageId: assistantId, token: event.text });
-        } else if (event.type === 'reasoning') {
-          emit(events.onReasoning, { conversationId: conversation.id, messageId: assistantId, text: event.text });
-        } else {
-          result = event.result;
+      for await (const event of loop) {
+        switch (event.type) {
+          case 'turn':
+            emit(events.onStart, { conversationId, messageId: currentId, parentId: leafId, model });
+            break;
+          case 'token':
+            streamed += event.text;
+            emit(events.onToken, { conversationId, messageId: currentId, token: event.text });
+            break;
+          case 'reasoning':
+            emit(events.onReasoning, { conversationId, messageId: currentId, text: event.text });
+            break;
+          case 'tool_turn':
+            store(assistantMessage(currentId, leafId, conversationId, model, event.result, turnStartedAt));
+            // Whatever comes next — the next turn, or a stopped reply if the
+            // cancel lands while tools run — is a new message.
+            currentId = generateId();
+            streamed = '';
+            turnStartedAt = Date.now();
+            break;
+          case 'tool_start':
+            emit(events.onToolStart, {
+              conversationId,
+              messageId: currentId,
+              callId: event.call.id,
+              name: event.call.function.name,
+              args: capForDisplay(event.call.function.arguments),
+              iteration: event.iteration
+            });
+            break;
+          case 'tool_end': {
+            emit(events.onToolEnd, {
+              conversationId,
+              messageId: currentId,
+              callId: event.call.id,
+              name: event.call.function.name,
+              isError: event.outcome.isError,
+              durationMs: event.durationMs,
+              iteration: event.iteration
+            });
+            const toolMessage: ChatMessage = {
+              id: generateId(),
+              conversationId,
+              parentId: leafId,
+              role: 'tool',
+              content: capForStorage(event.outcome.content),
+              createdAt: Date.now(),
+              toolCallId: event.call.id,
+              latencyMs: event.durationMs
+            };
+            if (event.outcome.isError) toolMessage.error = event.outcome.errorType ?? 'tool_error';
+            store(toolMessage);
+            break;
+          }
+          case 'done':
+            final = event.result;
+            break;
         }
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
-      this.inFlight.delete(conversation.id);
+      this.inFlight.delete(conversationId);
     }
 
-    const assistantMessage: ChatMessage = {
-      id: assistantId,
-      conversationId: conversation.id,
-      parentId: userMessage.id,
-      role: 'assistant',
-      content: result?.content ?? streamed,
-      createdAt: Date.now(),
-      model: result?.model ?? model,
-      latencyMs: Date.now() - startedAt
-    };
-    if (result) {
-      assistantMessage.tokenUsage = result.tokenUsage;
-      if (result.cost !== undefined) assistantMessage.cost = result.cost;
-      if (result.finishReason) assistantMessage.finishReason = result.finishReason;
-      if (result.reasoning) assistantMessage.reasoning = result.reasoning;
-      if (result.toolCalls?.length) assistantMessage.toolCalls = result.toolCalls;
-    }
-    if (error) assistantMessage.error = error;
+    // The final reply carries the whole turn's usage, cost and latency.
+    const reply = assistantMessage(currentId, leafId, conversationId, model, final, startedAt, streamed);
+    if (error) reply.error = error;
 
-    this.db.createMessage(assistantMessage);
-    this.db.updateConversation(conversation.id, { activeLeafId: assistantMessage.id });
+    this.db.createMessage(reply);
+    this.db.updateConversation(conversationId, { activeLeafId: reply.id });
 
     if (error) {
-      emit(events.onError, {
-        conversationId: conversation.id,
-        messageId: assistantMessage.id,
-        error,
-        message: assistantMessage
-      });
+      emit(events.onError, { conversationId, messageId: reply.id, error, message: reply });
     } else {
-      emit(events.onComplete, { conversationId: conversation.id, message: assistantMessage });
+      emit(events.onComplete, { conversationId, message: reply });
     }
-    return assistantMessage;
+    return reply;
   }
 
   /** Stop the in-flight generation; what streamed so far is kept. */
@@ -234,6 +286,36 @@ export class ChatService {
     controller.abort();
     return true;
   }
+}
+
+function assistantMessage(
+  id: string,
+  parentId: string,
+  conversationId: string,
+  model: string,
+  result: ChatResult | undefined,
+  startedAt: number,
+  streamed = ''
+): ChatMessage {
+  const message: ChatMessage = {
+    id,
+    conversationId,
+    parentId,
+    role: 'assistant',
+    content: result?.content ?? streamed,
+    createdAt: Date.now(),
+    model: result?.model ?? model,
+    latencyMs: Date.now() - startedAt
+  };
+  if (result) {
+    message.tokenUsage = result.tokenUsage;
+    if (result.cost !== undefined) message.cost = result.cost;
+    if (result.finishReason) message.finishReason = result.finishReason;
+    if (result.reasoning) message.reasoning = result.reasoning;
+    if (result.reasoningDetails?.length) message.reasoningDetails = result.reasoningDetails;
+    if (result.toolCalls?.length) message.toolCalls = result.toolCalls;
+  }
+  return message;
 }
 
 function deriveTitle(content: string): string {

@@ -207,6 +207,8 @@ export interface ChatParams {
   frequencyPenalty?: number;
   presencePenalty?: number;
   stop?: string[];
+  /** Let the model call tools (run_workflow and the builtins). On unless false. */
+  tools?: boolean;
   routing?: OpenRouterRouting;
   sampling?: OpenRouterSampling;
   reasoning?: OpenRouterReasoning;
@@ -265,10 +267,15 @@ export interface ChatMessage {
   finishReason?: string;
   /** Reasoning trace emitted by a thinking model. */
   reasoning?: string;
+  /** The provider's structured reasoning blocks, replayed with tool calls so a thinking model keeps its thread. */
+  reasoningDetails?: unknown[];
   toolCalls?: ChatToolCall[];
   /** For a 'tool' message: the assistant tool call it answers. */
   toolCallId?: string;
-  /** Set when the generation failed; `content` holds whatever streamed first. */
+  /**
+   * Set when the generation failed (`content` holds whatever streamed first)
+   * or, on a tool message, when the tool reported an error.
+   */
   error?: string;
 }
 
@@ -303,8 +310,9 @@ export interface ChatModel {
 //
 // Client → server: `chat:send` (ChatSendRequest), `chat:cancel`
 // ({ conversationId }), `chat:join` / `chat:leave` (conversationId).
-// Server → the conversation's room: `chat:message`, `chat:start`,
-// `chat:token`, `chat:reasoning`, `chat:complete`, `chat:error`.
+// Server → the conversation's room: `chat:message` (any stored message),
+// `chat:start`, `chat:token`, `chat:reasoning`, `chat:tool_start`,
+// `chat:tool_end`, `chat:complete`, `chat:error`.
 
 export interface ChatSendRequest {
   conversationId: string;
@@ -317,7 +325,10 @@ export interface ChatSendRequest {
   params?: ChatParams;
 }
 
-/** The stored user message that opened the turn. */
+/**
+ * A message stored during the turn: the user's, an assistant turn that
+ * called tools, or a tool result. The final reply arrives as `chat:complete`.
+ */
 export interface ChatMessageEvent {
   conversationId: string;
   message: ChatMessage;
@@ -354,6 +365,28 @@ export interface ChatErrorEvent {
   messageId?: string;
   /** The stored (failed) assistant message, when the turn got that far. */
   message?: ChatMessage;
+}
+
+/** A tool call is running. */
+export interface ChatToolStartEvent {
+  conversationId: string;
+  /** The assistant message that made the call. */
+  messageId: string;
+  callId: string;
+  name: string;
+  /** The call's JSON arguments, trimmed for display. */
+  args: string;
+  iteration: number;
+}
+
+export interface ChatToolEndEvent {
+  conversationId: string;
+  messageId: string;
+  callId: string;
+  name: string;
+  isError: boolean;
+  durationMs: number;
+  iteration: number;
 }
 
 // ==================== API Types ====================

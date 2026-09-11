@@ -102,7 +102,7 @@ Messages form a tree: each message records its parent, so a conversation can bra
 | `/api/models` | GET | The OpenRouter catalog (`?q=` searches it, `?refresh=1` bypasses the 5-minute cache) |
 | `/health` | GET | Includes `chat: { configured, defaultModel }` |
 
-`params` are the generation settings for the conversation: `temperature`, `maxTokens`, `topP`, `frequencyPenalty`, `presencePenalty`, `stop`.
+`params` are the generation settings for the conversation: `temperature`, `maxTokens`, `topP`, `frequencyPenalty`, `presencePenalty`, `stop`, and `tools` (default on; `false` makes the conversation plain chat).
 
 ### Socket events
 
@@ -110,16 +110,33 @@ Send `chat:send` with `{ conversationId, content, parentId?, model?, params? }`.
 
 | Event | Payload |
 |-------|---------|
-| `chat:message` | `{ conversationId, message }` — the stored user message |
+| `chat:message` | `{ conversationId, message }` — a stored message: the user's, an assistant turn that called tools, or a tool result |
 | `chat:start` | `{ conversationId, messageId, parentId, model }` |
 | `chat:token` | `{ conversationId, messageId, token }` |
 | `chat:reasoning` | `{ conversationId, messageId, text }` — thinking-model traces |
+| `chat:tool_start` | `{ conversationId, messageId, callId, name, args, iteration }` — a tool call is running |
+| `chat:tool_end` | `{ conversationId, messageId, callId, name, isError, durationMs, iteration }` |
 | `chat:complete` | `{ conversationId, message }` — the stored assistant message, with token usage, cost and latency |
 | `chat:error` | `{ conversationId, error, messageId?, message? }` |
 
 `chat:cancel` with `{ conversationId }` stops a reply in progress; what streamed so far is kept.
 
 Try it end to end with a running server: `npm run smoke:chat --prefix server`.
+
+### Tools
+
+The model can call tools during a turn. The loop runs up to 8 provider calls, executing every requested tool in between and feeding the results back; the 9th call is forced to answer in text. Tool calls, their results and the final reply are stored as messages in the conversation tree, so the next turn sees them.
+
+| Tool | What it does |
+|------|--------------|
+| `list_workflows` | The stored workflows with their ids, node counts and input-node names |
+| `run_workflow` | Runs a stored workflow by name or id — `inputs` is an object keyed by input-node name — and returns its output plus a per-node roll-call |
+| `calculate` | Evaluates an arithmetic expression |
+| `current_time` | The current time in UTC and, optionally, an IANA time zone |
+
+A tool never throws at the model: unknown tools, bad arguments and failures come back as error results it can act on. Results are capped at 120K characters in the loop and 16K characters in storage. Prompt nodes inside a workflow use the workflow engine's own OpenAI key (`OPENAI_API_KEY`), not OpenRouter.
+
+Live smoke: `npm run smoke:tools --prefix server` (creates a small workflow, has the model run it, then cleans up).
 
 ## Keyboard Shortcuts
 

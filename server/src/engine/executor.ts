@@ -21,8 +21,8 @@ export class WorkflowExecutor {
   private llmAdapter: LLMAdapter;
   private db: Database;
 
-  constructor(db: Database) {
-    this.llmAdapter = new LLMAdapter();
+  constructor(db: Database, llmAdapter?: LLMAdapter) {
+    this.llmAdapter = llmAdapter ?? new LLMAdapter();
     this.db = db;
   }
 
@@ -173,9 +173,10 @@ export class WorkflowExecutor {
       // Calculate cost if token usage is available
       let cost = 0;
       if (model && tokenUsage.total > 0) {
-        const modelConfig = this.getModelConfig(model);
-        if (modelConfig) {
-          cost = calculateCost(tokenUsage, modelConfig.pricing);
+        // getModelConfig returns the pricing pair itself
+        const pricing = this.getModelConfig(model);
+        if (pricing) {
+          cost = calculateCost(tokenUsage, pricing);
         }
       }
 

@@ -96,6 +96,7 @@ export class Database {
         latency_ms INTEGER,
         finish_reason TEXT,
         reasoning TEXT,
+        reasoning_details TEXT,
         tool_calls TEXT,
         tool_call_id TEXT,
         error TEXT,
@@ -108,6 +109,8 @@ export class Database {
       CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at)
     `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)`);
+    // Columns added after the table first shipped
+    this.ensureColumn('messages', 'reasoning_details', 'TEXT');
 
     // Model configs table
     this.db.exec(`
@@ -238,8 +241,16 @@ export class Database {
     );
   }
 
+  // Runs of the workflow go with it: better-sqlite3 enforces foreign keys,
+  // so a workflow that has executed cannot be deleted on its own.
   deleteWorkflow(id: string): void {
-    this.db.prepare('DELETE FROM workflows WHERE id = ?').run(id);
+    this.db.transaction(() => {
+      this.db
+        .prepare('DELETE FROM execution_traces WHERE execution_id IN (SELECT id FROM executions WHERE workflow_id = ?)')
+        .run(id);
+      this.db.prepare('DELETE FROM executions WHERE workflow_id = ?').run(id);
+      this.db.prepare('DELETE FROM workflows WHERE id = ?').run(id);
+    })();
   }
 
   private parseWorkflow(row: any): Workflow {
@@ -324,6 +335,13 @@ export class Database {
       pricing: JSON.parse(row.pricing),
       capabilities: JSON.parse(row.capabilities)
     }));
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((existing) => existing.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   // Conversation operations
@@ -414,8 +432,8 @@ export class Database {
     const stmt = this.db.prepare(`
       INSERT INTO messages
       (id, conversation_id, parent_id, role, content, model, token_usage, cost, latency_ms,
-       finish_reason, reasoning, tool_calls, tool_call_id, error, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       finish_reason, reasoning, reasoning_details, tool_calls, tool_call_id, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       message.id,
@@ -429,6 +447,7 @@ export class Database {
       message.latencyMs ?? null,
       message.finishReason ?? null,
       message.reasoning ?? null,
+      message.reasoningDetails ? JSON.stringify(message.reasoningDetails) : null,
       message.toolCalls ? JSON.stringify(message.toolCalls) : null,
       message.toolCallId ?? null,
       message.error ?? null,
@@ -481,6 +500,7 @@ export class Database {
     if (row.latency_ms != null) message.latencyMs = row.latency_ms;
     if (row.finish_reason != null) message.finishReason = row.finish_reason;
     if (row.reasoning != null) message.reasoning = row.reasoning;
+    if (row.reasoning_details != null) message.reasoningDetails = JSON.parse(row.reasoning_details);
     if (row.tool_calls != null) message.toolCalls = JSON.parse(row.tool_calls);
     if (row.tool_call_id != null) message.toolCallId = row.tool_call_id;
     if (row.error != null) message.error = row.error;

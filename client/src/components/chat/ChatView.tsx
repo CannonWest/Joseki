@@ -53,6 +53,7 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
   const messages = useChatStore((state) => state.messages);
   const streaming = useChatStore((state) => state.streaming);
   const generating = useChatStore((state) => state.generating);
+  const toolActivity = useChatStore((state) => state.toolActivity);
   const error = useChatStore((state) => state.error);
   const {
     checkHealth,
@@ -167,7 +168,12 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
           <div className="flex-1 flex flex-col min-w-0">
             {conversation ? (
               <>
-                <MessageThread messages={thread} streaming={streaming} generating={generating} />
+                <MessageThread
+                  messages={thread}
+                  streaming={streaming}
+                  generating={generating}
+                  toolActivity={toolActivity}
+                />
                 <Composer
                   disabled={disabled}
                   busy={busy}

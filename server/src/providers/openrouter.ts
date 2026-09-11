@@ -57,6 +57,11 @@ export class ProviderError extends Error {
 export type WireMessage = OpenAI.Chat.ChatCompletionMessageParam;
 export type WireTool = OpenAI.Chat.ChatCompletionTool;
 export type WireToolChoice = OpenAI.Chat.ChatCompletionToolChoiceOption;
+/** An assistant history message with OpenRouter's reasoning fields. */
+export type AssistantWireMessage = OpenAI.Chat.ChatCompletionAssistantMessageParam & {
+  reasoning?: string;
+  reasoning_details?: unknown[];
+};
 
 export interface ChatRequest {
   model: string;
@@ -74,6 +79,8 @@ export interface ChatResult {
   cost?: number;
   finishReason?: string;
   reasoning?: string;
+  /** OpenRouter's structured reasoning blocks — replayed with tool calls. */
+  reasoningDetails?: unknown[];
   toolCalls?: ChatToolCall[];
 }
 
@@ -218,6 +225,9 @@ export class OpenRouterProvider {
     // DeepSeek/Kimi spelling some upstreams pass through.
     const reasoning = message.reasoning ?? message.reasoning_content;
     if (typeof reasoning === 'string' && reasoning) result.reasoning = reasoning;
+    if (Array.isArray(message.reasoning_details) && message.reasoning_details.length) {
+      result.reasoningDetails = message.reasoning_details;
+    }
     if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
       result.toolCalls = message.tool_calls.map(serializeToolCall);
     }
@@ -238,6 +248,7 @@ export class OpenRouterProvider {
 
     let content = '';
     let reasoning = '';
+    const reasoningDetails: unknown[] = [];
     let model = request.model;
     let finishReason: string | undefined;
     let usage: unknown;
@@ -258,6 +269,7 @@ export class OpenRouterProvider {
         const delta = choice.delta ?? {};
         if (delta.tool_calls) accumulateToolCallDeltas(toolCalls, delta.tool_calls);
 
+        if (Array.isArray(delta.reasoning_details)) mergeReasoningDetails(reasoningDetails, delta.reasoning_details);
         const reasoningDelta = delta.reasoning ?? delta.reasoning_content;
         if (typeof reasoningDelta === 'string' && reasoningDelta) {
           reasoning += reasoningDelta;
@@ -278,6 +290,7 @@ export class OpenRouterProvider {
     const { tokenUsage, cost } = extractUsage(usage);
     const result: ChatResult = { content, model, tokenUsage, cost, finishReason };
     if (reasoning) result.reasoning = reasoning;
+    if (reasoningDetails.length) result.reasoningDetails = reasoningDetails;
     if (toolCalls.size) result.toolCalls = finalizeToolCallDeltas(toolCalls);
     yield { type: 'done', result };
   }
@@ -333,11 +346,17 @@ export function toWireMessages(
       case 'assistant': {
         const toolCalls = message.toolCalls ?? [];
         if (!message.content && toolCalls.length === 0) continue;
-        const entry: OpenAI.Chat.ChatCompletionAssistantMessageParam = {
+        const entry: AssistantWireMessage = {
           role: 'assistant',
           content: message.content
         };
-        if (toolCalls.length) entry.tool_calls = toolCalls;
+        if (toolCalls.length) {
+          entry.tool_calls = toolCalls;
+          // A thinking model must see its own reasoning next to the calls it
+          // made: OpenRouter replays `reasoning_details`, or the plain text.
+          if (message.reasoningDetails?.length) entry.reasoning_details = message.reasoningDetails;
+          else if (message.reasoning) entry.reasoning = message.reasoning;
+        }
         wire.push(entry);
         break;
       }
@@ -429,6 +448,31 @@ export function extractUsage(usage: unknown): { tokenUsage: ChatTokenUsage; cost
       ? undefined
       : Math.round(((gatewayCost ?? 0) + (upstreamCost ?? 0)) * 1e10) / 1e10;
   return { tokenUsage, cost };
+}
+
+/**
+ * Fold one chunk's `delta.reasoning_details` into the running list. A text
+ * fragment continuing the previous item (same index) is appended to it;
+ * everything else is kept as sent, so the array replays intact.
+ */
+export function mergeReasoningDetails(acc: unknown[], incoming: unknown[]): void {
+  for (const item of incoming) {
+    if (!isRecord(item)) continue;
+    const last = acc[acc.length - 1];
+    if (
+      isRecord(last) &&
+      item.type === 'reasoning.text' &&
+      last.type === 'reasoning.text' &&
+      (item.index ?? null) === (last.index ?? null) &&
+      typeof item.text === 'string' &&
+      typeof last.text === 'string'
+    ) {
+      last.text += item.text;
+      if (typeof item.signature === 'string' && item.signature) last.signature = item.signature;
+      continue;
+    }
+    acc.push({ ...item });
+  }
 }
 
 function serializeToolCall(call: any): ChatToolCall {

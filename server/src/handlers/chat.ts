@@ -32,10 +32,12 @@ export function setupChatHandlers(io: Server, chat: ChatService) {
 
       try {
         await chat.send(data, {
-          onUserMessage: (message) => broadcast('chat:message', { conversationId, message }),
+          onMessage: (message) => broadcast('chat:message', { conversationId, message }),
           onStart: (event) => broadcast('chat:start', event),
           onToken: (event) => broadcast('chat:token', event),
           onReasoning: (event) => broadcast('chat:reasoning', event),
+          onToolStart: (event) => broadcast('chat:tool_start', event),
+          onToolEnd: (event) => broadcast('chat:tool_end', event),
           onComplete: (event) => broadcast('chat:complete', event),
           onError: (event) => broadcast('chat:error', event)
         });

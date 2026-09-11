@@ -4,7 +4,7 @@ import type { StreamingReply } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
 import { formatCost, formatLatency, formatTokens, shortModel } from './format';
 
-function Reasoning({ text, live = false }: { text: string; live?: boolean }) {
+export function Reasoning({ text, live = false }: { text: string; live?: boolean }) {
   return (
     <details className="mb-2 text-xs">
       <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-300">
@@ -15,10 +15,21 @@ function Reasoning({ text, live = false }: { text: string; live?: boolean }) {
   );
 }
 
-function Meta({ items }: { items: Array<string | null | undefined> }) {
+export function Meta({ items }: { items: Array<string | null | undefined> }) {
   const shown = items.filter((item): item is string => Boolean(item));
   if (shown.length === 0) return null;
   return <div className="mt-2 text-xs text-slate-500">{shown.join(' · ')}</div>;
+}
+
+/** The meta line of an assistant message: model · tokens · cost · latency · stopped */
+export function assistantMeta(message: ChatMessage): Array<string | null | undefined> {
+  return [
+    message.model ? shortModel(message.model) : null,
+    formatTokens(message.tokenUsage?.total),
+    formatCost(message.cost),
+    formatLatency(message.latencyMs),
+    message.finishReason === 'cancelled' ? 'stopped' : null
+  ];
 }
 
 export const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
@@ -32,8 +43,13 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
         </div>
       );
     case 'tool':
+      // A tool result whose call is not in view (normally it renders inside its ToolTurnCard)
       return (
-        <div className="text-xs font-mono bg-slate-900 border border-slate-800 rounded px-3 py-2 text-slate-400 whitespace-pre-wrap break-words">
+        <div
+          className={`text-xs font-mono rounded px-3 py-2 whitespace-pre-wrap break-words border ${
+            message.error ? 'bg-red-950/30 border-red-900 text-red-200' : 'bg-slate-900 border-slate-800 text-slate-400'
+          }`}
+        >
           {message.content}
         </div>
       );
@@ -41,7 +57,6 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
       return <div className="text-xs text-slate-500 text-center italic">{message.content}</div>;
     default: {
       const failed = Boolean(message.error);
-      const cancelled = message.finishReason === 'cancelled';
       return (
         <div className="flex justify-start">
           <div
@@ -56,15 +71,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
               !failed && <span className="text-sm text-slate-500 italic">Empty reply</span>
             )}
             {failed && <div className="mt-2 text-sm text-red-300">{message.error}</div>}
-            <Meta
-              items={[
-                message.model ? shortModel(message.model) : null,
-                formatTokens(message.tokenUsage?.total),
-                formatCost(message.cost),
-                formatLatency(message.latencyMs),
-                cancelled ? 'stopped' : null
-              ]}
-            />
+            <Meta items={assistantMeta(message)} />
           </div>
         </div>
       );

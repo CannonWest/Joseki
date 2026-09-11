@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
 import { Database } from '../src/db/database';
 import {
   ChatError,
@@ -10,6 +11,7 @@ import {
   type ChatProvider
 } from '../src/chat/service';
 import type { ChatRequest, ChatResult, ChatStreamEvent } from '../src/providers/openrouter';
+import { ToolRegistry, ok } from '../src/tools/registry';
 
 type Script = (request: ChatRequest, signal?: AbortSignal) => AsyncGenerator<ChatStreamEvent>;
 
@@ -61,24 +63,88 @@ function hanging(): Script {
   };
 }
 
+interface Turn {
+  tokens?: string[];
+  content?: string;
+  toolCalls?: ChatToolCall[];
+  usage?: Partial<ChatTokenUsage>;
+  cost?: number;
+}
+
+/** Answers each provider call with the next scripted turn (the last one repeats). */
+function turns(script: Turn[]): Script {
+  let calls = 0;
+  return async function* (request) {
+    const turn = script[Math.min(calls++, script.length - 1)];
+    for (const text of turn.tokens ?? []) yield { type: 'token', text };
+    yield {
+      type: 'done',
+      result: {
+        content: turn.content ?? (turn.tokens ?? []).join(''),
+        model: request.model,
+        tokenUsage: { prompt: 10, completion: 5, total: 15, ...turn.usage },
+        cost: turn.cost ?? 0.001,
+        finishReason: turn.toolCalls ? 'tool_calls' : 'stop',
+        ...(turn.toolCalls ? { toolCalls: turn.toolCalls } : {})
+      }
+    };
+  };
+}
+
+const call = (id: string, name: string, args: unknown): ChatToolCall => ({
+  id,
+  type: 'function',
+  function: { name, arguments: JSON.stringify(args) }
+});
+
 function recorder() {
   const log: string[] = [];
   const events: ChatEvents = {
-    onUserMessage: (m) => log.push(`user:${m.content}`),
+    onMessage: (m) => log.push(`${m.role}:${m.content}`),
     onStart: (e) => log.push(`start:${e.model}`),
     onToken: (e) => log.push(`token:${e.token}`),
     onReasoning: (e) => log.push(`reasoning:${e.text}`),
+    onToolStart: (e) => log.push(`tool_start:${e.name}`),
+    onToolEnd: (e) => log.push(`tool_end:${e.name}:${e.isError ? 'error' : 'ok'}`),
     onComplete: (e) => log.push(`complete:${e.message.content}`),
     onError: (e) => log.push(`error:${e.error}`)
   };
   return { log, events };
 }
 
-function setup(script: Script) {
+function setup(script: Script, tools?: ToolRegistry) {
   const db = new Database(':memory:');
   const provider = new FakeProvider(script);
-  const service = new ChatService(db, provider, { defaultModel: 'test/model' });
+  const service = new ChatService(db, provider, { defaultModel: 'test/model', tools });
   return { db, provider, service };
+}
+
+function toolRegistry() {
+  return new ToolRegistry()
+    .register({
+      name: 'echo',
+      description: 'echo',
+      parameters: { type: 'object', properties: {} },
+      async execute(args) {
+        return ok(`echo:${JSON.stringify(args)}`);
+      }
+    })
+    .register({
+      name: 'big',
+      description: 'big',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        return ok('x'.repeat(20_000));
+      }
+    })
+    .register({
+      name: 'boom',
+      description: 'boom',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        throw new Error('kaboom');
+      }
+    });
 }
 
 test('createConversation applies defaults and trims what it is given', () => {
@@ -140,6 +206,7 @@ test('a turn stores both messages, streams events in order and moves the active 
     { role: 'user', content: 'Hi there' }
   ]);
   assert.deepEqual(provider.requests[0].params, DEFAULT_CHAT_PARAMS);
+  assert.equal('tools' in provider.requests[0], false);
   assert.equal(service.isGenerating(conversation.id), false);
 });
 
@@ -314,4 +381,149 @@ test('a listener that throws does not break the turn', async () => {
   assert.equal(assistant.content, 'ok');
   assert.equal(assistant.error, undefined);
   assert.equal(db.getMessages(conversation.id).length, 2);
+});
+
+// ---- tools ----
+
+test('a tool turn stores the call, the result and the final reply in one chain', async () => {
+  const { db, provider, service } = setup(
+    turns([
+      { content: 'Checking…', toolCalls: [call('c1', 'echo', { a: 1 })], usage: { prompt: 10, completion: 5, total: 15 }, cost: 0.001 },
+      { tokens: ['Done.'], usage: { prompt: 20, completion: 2, total: 22 }, cost: 0.002 }
+    ]),
+    toolRegistry()
+  );
+  const conversation = service.createConversation();
+  const { log, events } = recorder();
+
+  const reply = await service.send({ conversationId: conversation.id, content: 'go' }, events);
+
+  assert.deepEqual(log, [
+    'user:go',
+    'start:test/model',
+    'assistant:Checking…',
+    'tool_start:echo',
+    'tool_end:echo:ok',
+    'tool:echo:{"a":1}',
+    'start:test/model',
+    'token:Done.',
+    'complete:Done.'
+  ]);
+
+  const stored = db.getMessages(conversation.id);
+  assert.deepEqual(stored.map((m) => m.role), ['user', 'assistant', 'tool', 'assistant']);
+  assert.ok(stored.every((m, i) => i === 0 || m.parentId === stored[i - 1].id), 'each message parents the previous one');
+
+  const toolTurn = stored[1];
+  assert.equal(toolTurn.content, 'Checking…');
+  assert.deepEqual(toolTurn.toolCalls, [call('c1', 'echo', { a: 1 })]);
+  assert.equal(toolTurn.finishReason, 'tool_calls');
+  assert.deepEqual(toolTurn.tokenUsage, { prompt: 10, completion: 5, total: 15 });
+
+  const toolResult = stored[2];
+  assert.equal(toolResult.toolCallId, 'c1');
+  assert.equal(toolResult.content, 'echo:{"a":1}');
+  assert.equal(typeof toolResult.latencyMs, 'number');
+  assert.equal(toolResult.error, undefined);
+
+  assert.equal(reply.id, stored[3].id);
+  assert.equal(reply.content, 'Done.');
+  assert.deepEqual(reply.tokenUsage, { prompt: 30, completion: 7, total: 37 });
+  assert.equal(reply.cost, 0.003);
+  assert.equal(db.getConversation(conversation.id)!.activeLeafId, reply.id);
+  assert.equal(db.getActivePath(conversation.id).length, 4);
+
+  assert.deepEqual(provider.requests[0].tools?.map((t) => t.function.name), ['echo', 'big', 'boom']);
+  assert.equal(provider.requests[0].toolChoice, 'auto');
+  assert.deepEqual(provider.requests[1].messages, [
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: 'Checking…', tool_calls: [call('c1', 'echo', { a: 1 })] },
+    { role: 'tool', tool_call_id: 'c1', content: 'echo:{"a":1}' }
+  ]);
+});
+
+test('the next turn replays the stored tool exchange to the model', async () => {
+  const { provider, service } = setup(
+    turns([{ toolCalls: [call('c1', 'echo', {})] }, { content: 'first' }, { content: 'second' }]),
+    toolRegistry()
+  );
+  const conversation = service.createConversation();
+  await service.send({ conversationId: conversation.id, content: 'one' });
+  await service.send({ conversationId: conversation.id, content: 'two' });
+
+  assert.deepEqual(provider.requests[2].messages, [
+    { role: 'user', content: 'one' },
+    { role: 'assistant', content: '', tool_calls: [call('c1', 'echo', {})] },
+    { role: 'tool', tool_call_id: 'c1', content: 'echo:{}' },
+    { role: 'assistant', content: 'first' },
+    { role: 'user', content: 'two' }
+  ]);
+});
+
+test('params.tools false makes a plain turn, per conversation or per message', async () => {
+  const { provider, service } = setup(turns([{ content: 'plain' }]), toolRegistry());
+
+  const off = service.createConversation({ params: { tools: false } });
+  await service.send({ conversationId: off.id, content: 'hi' });
+  assert.equal('tools' in provider.requests[0], false);
+
+  const on = service.createConversation();
+  await service.send({ conversationId: on.id, content: 'hi', params: { tools: false } });
+  assert.equal('tools' in provider.requests[1], false);
+  await service.send({ conversationId: on.id, content: 'again' });
+  assert.equal(provider.requests[2].tools?.length, 3);
+});
+
+test('a failing tool is stored as an errored tool message and the model still answers', async () => {
+  const { db, service } = setup(turns([{ toolCalls: [call('c1', 'boom', {})] }, { content: 'sorry' }]), toolRegistry());
+  const conversation = service.createConversation();
+  const { log, events } = recorder();
+
+  const reply = await service.send({ conversationId: conversation.id, content: 'go' }, events);
+
+  const toolResult = db.getMessages(conversation.id)[2];
+  assert.equal(toolResult.role, 'tool');
+  assert.equal(toolResult.error, 'execution_error');
+  assert.match(toolResult.content, /kaboom/);
+  assert.ok(log.includes('tool_end:boom:error'));
+  assert.equal(reply.content, 'sorry');
+  assert.equal(reply.error, undefined);
+});
+
+test('a large tool result is capped in storage but reaches the model whole', async () => {
+  const { db, provider, service } = setup(turns([{ toolCalls: [call('c1', 'big', {})] }, { content: 'ok' }]), toolRegistry());
+  const conversation = service.createConversation();
+
+  await service.send({ conversationId: conversation.id, content: 'go' });
+
+  const stored = db.getMessages(conversation.id)[2];
+  assert.ok(stored.content.length < 16_100);
+  assert.match(stored.content, /\[tool result truncated at 16000 chars\]$/);
+  assert.equal((provider.requests[1].messages[2] as { content: string }).content.length, 20_000);
+});
+
+test('cancelling during a tool turn stores what happened and a stopped reply', async () => {
+  const db = new Database(':memory:');
+  const provider = new FakeProvider(turns([{ toolCalls: [call('c1', 'stop', {})] }, { content: 'never' }]));
+  let service!: ChatService;
+  const registry = new ToolRegistry().register({
+    name: 'stop',
+    description: 'cancels the turn from inside',
+    parameters: { type: 'object', properties: {} },
+    async execute(_args, context) {
+      service.cancel(context.conversationId);
+      return ok('stopped');
+    }
+  });
+  service = new ChatService(db, provider, { defaultModel: 'test/model', tools: registry });
+  const conversation = service.createConversation();
+
+  const reply = await service.send({ conversationId: conversation.id, content: 'go' });
+
+  assert.equal(provider.requests.length, 1);
+  assert.deepEqual(db.getMessages(conversation.id).map((m) => m.role), ['user', 'assistant', 'tool', 'assistant']);
+  assert.equal(reply.finishReason, 'cancelled');
+  assert.equal(reply.content, '');
+  assert.equal(reply.error, undefined);
+  assert.equal(service.isGenerating(conversation.id), false);
 });

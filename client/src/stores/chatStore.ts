@@ -9,6 +9,8 @@ import type {
   ChatReasoningEvent,
   ChatStartEvent,
   ChatTokenEvent,
+  ChatToolEndEvent,
+  ChatToolStartEvent,
   Conversation,
   ConversationDetail
 } from '@maestroai/shared';
@@ -23,6 +25,17 @@ export interface StreamingReply {
   model: string;
   content: string;
   reasoning: string;
+}
+
+/** A tool call in progress (or just finished) during the current turn. */
+export interface ToolActivity {
+  callId: string;
+  /** The assistant message that made the call. */
+  messageId: string;
+  name: string;
+  args: string;
+  status: 'running' | 'ok' | 'error';
+  durationMs?: number;
 }
 
 export interface ConversationPatch {
@@ -53,6 +66,8 @@ interface ChatState {
   /** The server is generating a reply for the open conversation. */
   generating: boolean;
   streaming: StreamingReply | null;
+  /** Tool calls of the turn in progress that have no stored result yet. */
+  toolActivity: ToolActivity[];
   catalog: ChatModel[];
   catalogStatus: CatalogStatus;
   error: string | null;
@@ -68,10 +83,12 @@ interface ChatState {
   clearError: () => void;
 
   // Socket events for the open conversation
-  handleUserMessage: (event: ChatMessageEvent) => void;
+  handleMessage: (event: ChatMessageEvent) => void;
   handleStart: (event: ChatStartEvent) => void;
   handleToken: (event: ChatTokenEvent) => void;
   handleReasoning: (event: ChatReasoningEvent) => void;
+  handleToolStart: (event: ChatToolStartEvent) => void;
+  handleToolEnd: (event: ChatToolEndEvent) => void;
   handleComplete: (event: ChatCompleteEvent) => void;
   handleError: (event: ChatErrorEvent) => void;
 }
@@ -121,7 +138,10 @@ function deriveTitle(content: string): string {
   return line.length > TITLE_MAX_LENGTH ? `${line.slice(0, TITLE_MAX_LENGTH - 1)}…` : line;
 }
 
-const idle = { streaming: null, generating: false } as const;
+/** Nothing in flight. */
+function idle(): Pick<ChatState, 'streaming' | 'generating' | 'toolActivity'> {
+  return { streaming: null, generating: false, toolActivity: [] };
+}
 
 function freshReply(messageId: string): StreamingReply {
   return { messageId, parentId: '', model: '', content: '', reasoning: '' };
@@ -135,6 +155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   generating: false,
   streaming: null,
+  toolActivity: [],
   catalog: [],
   catalogStatus: 'idle',
   error: null,
@@ -177,7 +198,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   openConversation: async (id) => {
-    set({ currentId: id, messages: [], error: null, ...idle });
+    set({ currentId: id, messages: [], error: null, ...idle() });
     try {
       const detail = await request<ConversationDetail>(`/api/conversations/${id}`, 'Failed to load conversation');
       if (get().currentId !== id) return; // switched away while loading
@@ -193,7 +214,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  closeConversation: () => set({ currentId: null, messages: [], ...idle }),
+  closeConversation: () => set({ currentId: null, messages: [], ...idle() }),
 
   updateConversation: async (id, patch) => {
     try {
@@ -215,7 +236,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await request<void>(`/api/conversations/${id}`, 'Failed to delete conversation', { method: 'DELETE' });
       set((state) => ({
         conversations: state.conversations.filter((c) => c.id !== id),
-        ...(state.currentId === id ? { currentId: null, messages: [], ...idle } : {})
+        ...(state.currentId === id ? { currentId: null, messages: [], ...idle() } : {})
       }));
       return true;
     } catch (error) {
@@ -241,17 +262,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
-  handleUserMessage: ({ conversationId, message }) => {
+  // Any stored message: the user's, an assistant tool turn, or a tool result.
+  handleMessage: ({ conversationId, message }) => {
     if (conversationId !== get().currentId) return;
     set((state) => {
       const current = state.conversations.find((c) => c.id === conversationId);
       const autoTitle =
-        current && current.title === DEFAULT_CONVERSATION_TITLE && current.activeLeafId === null
+        message.role === 'user' &&
+        current &&
+        current.title === DEFAULT_CONVERSATION_TITLE &&
+        current.activeLeafId === null
           ? deriveTitle(message.content)
           : undefined;
+      // A stored assistant turn replaces its streaming bubble; a stored tool
+      // result replaces its live status chip.
+      const streaming = state.streaming && state.streaming.messageId === message.id ? null : state.streaming;
+      const toolActivity =
+        message.role === 'tool'
+          ? state.toolActivity.filter((activity) => activity.callId !== message.toolCallId)
+          : state.toolActivity;
       return {
         messages: [...state.messages, message],
         generating: true,
+        streaming,
+        toolActivity,
         conversations: patchConversation(state.conversations, conversationId, {
           activeLeafId: message.id,
           updatedAt: message.createdAt,
@@ -298,11 +332,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  handleToolStart: (event) => {
+    if (event.conversationId !== get().currentId) return;
+    set((state) => ({
+      generating: true,
+      toolActivity: [
+        ...state.toolActivity.filter((activity) => activity.callId !== event.callId),
+        { callId: event.callId, messageId: event.messageId, name: event.name, args: event.args, status: 'running' }
+      ]
+    }));
+  },
+
+  handleToolEnd: (event) => {
+    if (event.conversationId !== get().currentId) return;
+    set((state) => ({
+      toolActivity: state.toolActivity.map((activity) =>
+        activity.callId === event.callId
+          ? { ...activity, status: event.isError ? 'error' : 'ok', durationMs: event.durationMs }
+          : activity
+      )
+    }));
+  },
+
   handleComplete: ({ conversationId, message }) => {
     if (conversationId !== get().currentId) return;
     set((state) => ({
       messages: [...state.messages, message],
-      ...idle,
+      ...idle(),
       conversations: patchConversation(state.conversations, conversationId, {
         activeLeafId: message.id,
         updatedAt: message.createdAt
@@ -316,7 +372,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (conversationId !== get().currentId) return;
     set((state) => ({
       messages: message ? [...state.messages, message] : state.messages,
-      ...idle,
+      ...idle(),
       // A stored failed reply shows its error inline; only turn-level
       // failures (nothing stored) need the banner.
       error: message ? state.error : error,

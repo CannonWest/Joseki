@@ -28,6 +28,7 @@ import { setupSocketHandlers } from './handlers/socket';
 import { setupChatHandlers } from './handlers/chat';
 import { OpenRouterProvider, DEFAULT_CHAT_MODEL } from './providers/openrouter';
 import { ChatService } from './chat/service';
+import { createDefaultRegistry } from './tools/builtins';
 
 const app = express();
 const httpServer = createServer(app);
@@ -48,7 +49,10 @@ if (!openRouter) {
   console.warn('OPENROUTER_API_KEY is not set — chat is disabled');
 }
 const defaultChatModel = process.env.OPENROUTER_DEFAULT_MODEL || DEFAULT_CHAT_MODEL;
-const chat = new ChatService(db, openRouter, { defaultModel: defaultChatModel });
+const chat = new ChatService(db, openRouter, {
+  defaultModel: defaultChatModel,
+  tools: createDefaultRegistry()
+});
 
 // Middleware
 app.use(cors());

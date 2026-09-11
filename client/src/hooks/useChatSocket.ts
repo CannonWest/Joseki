@@ -30,10 +30,12 @@ export function useChatSocket() {
     });
     socket.on('disconnect', () => setIsConnected(false));
 
-    socket.on('chat:message', (event) => store().handleUserMessage(event));
+    socket.on('chat:message', (event) => store().handleMessage(event));
     socket.on('chat:start', (event) => store().handleStart(event));
     socket.on('chat:token', (event) => store().handleToken(event));
     socket.on('chat:reasoning', (event) => store().handleReasoning(event));
+    socket.on('chat:tool_start', (event) => store().handleToolStart(event));
+    socket.on('chat:tool_end', (event) => store().handleToolEnd(event));
     socket.on('chat:complete', (event) => store().handleComplete(event));
     socket.on('chat:error', (event) => store().handleError(event));
 

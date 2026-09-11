@@ -97,6 +97,7 @@ test('message metadata survives the round-trip and unset fields stay absent', ()
     latencyMs: 250,
     finishReason: 'stop',
     reasoning: 'because',
+    reasoningDetails: [{ type: 'reasoning.text', text: 'because', index: 0 }],
     toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'f', arguments: '{}' } }]
   };
   db.createMessage(full);
@@ -133,6 +134,33 @@ test('deleting a conversation removes its messages and leaves others alone', () 
   db.close();
 });
 
+test('deleting a workflow that has run removes its executions and traces too', () => {
+  const db = new Database(':memory:');
+  const [workflow] = db.getAllWorkflows();
+  db.createExecution({ id: 'run-1', workflowId: workflow.id, status: 'running', context: {}, startedAt: 1 });
+  db.createExecutionTrace({
+    executionId: 'run-1',
+    nodeId: workflow.nodes[0].id,
+    runId: 'run-1',
+    timestamp: 1,
+    input: null,
+    output: 'x',
+    tokenUsage: { prompt: 0, completion: 0, total: 0 },
+    cost: 0,
+    latencyMs: 1,
+    status: 'success'
+  });
+
+  // Foreign keys are enforced: without the cascade this throws.
+  db.deleteWorkflow(workflow.id);
+
+  assert.equal(db.getWorkflow(workflow.id), undefined);
+  const raw = (db as unknown as { db: BetterSqlite3.Database }).db;
+  assert.deepEqual(raw.prepare('SELECT COUNT(*) AS n FROM executions').get(), { n: 0 });
+  assert.deepEqual(raw.prepare('SELECT COUNT(*) AS n FROM execution_traces').get(), { n: 0 });
+  db.close();
+});
+
 test('opening an existing database replaces the vestigial conversation_trees table', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestroai-db-'));
   const file = path.join(dir, 'legacy.db');
@@ -155,4 +183,35 @@ test('opening an existing database replaces the vestigial conversation_trees tab
   assert.ok(tables.includes('conversations'));
   assert.ok(tables.includes('messages'));
   assert.ok(tables.includes('workflows'));
+});
+
+test('opening a database from before reasoning_details adds the column and keeps the rows', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestroai-db-'));
+  const file = path.join(dir, 'older.db');
+  const older = new BetterSqlite3(file);
+  older.exec(`
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, model TEXT NOT NULL, system_prompt TEXT,
+      params TEXT NOT NULL, active_leaf_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, parent_id TEXT, role TEXT NOT NULL,
+      content TEXT NOT NULL, model TEXT, token_usage TEXT, cost REAL, latency_ms INTEGER,
+      finish_reason TEXT, reasoning TEXT, tool_calls TEXT, tool_call_id TEXT, error TEXT,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO conversations VALUES ('c1', 'Old', 'm', NULL, '{}', 'u1', 1, 1);
+    INSERT INTO messages (id, conversation_id, parent_id, role, content, created_at) VALUES ('u1', 'c1', NULL, 'user', 'hello', 1);
+  `);
+  older.close();
+
+  const db = new Database(file);
+  assert.deepEqual(db.getMessage('u1'), { id: 'u1', conversationId: 'c1', parentId: null, role: 'user', content: 'hello', createdAt: 1 });
+  db.createMessage({
+    ...message('a1', 'c1', 'u1', 'assistant', 'hi', 2),
+    reasoningDetails: [{ type: 'reasoning.text', text: 't', index: 0 }]
+  });
+  assert.deepEqual(db.getMessage('a1')?.reasoningDetails, [{ type: 'reasoning.text', text: 't', index: 0 }]);
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });

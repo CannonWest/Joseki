@@ -6,6 +6,7 @@ import {
   buildChatCompletionBody,
   extractUsage,
   filterModels,
+  mergeReasoningDetails,
   normalizeModelRecord,
   toWireMessages,
   type ChatStreamEvent,
@@ -422,6 +423,66 @@ test('listModels turns HTTP failures into a ProviderError', async () => {
     provider.listModels(),
     (error: Error & { status?: number }) => error.name === 'ProviderError' && error.status === 401
   );
+});
+
+test('chatStream collects reasoning_details, merging streamed text fragments', async () => {
+  const { client } = fakeClient([
+    { choices: [{ delta: { reasoning: 'Let me ', reasoning_details: [{ type: 'reasoning.text', text: 'Let me ', id: 'r1', format: 'anthropic-claude-v1', index: 0 }] } }] },
+    { choices: [{ delta: { reasoning: 'think.', reasoning_details: [{ type: 'reasoning.text', text: 'think.', id: 'r1', format: 'anthropic-claude-v1', index: 0, signature: 'sig' }] } }] },
+    { choices: [{ delta: { reasoning_details: [{ type: 'reasoning.encrypted', data: 'xyz', id: 'r2', format: 'anthropic-claude-v1', index: 1 }] } }] },
+    { choices: [{ delta: { content: 'Hi' }, finish_reason: 'stop' }] }
+  ]);
+  const provider = new OpenRouterProvider({ apiKey: 'test', client });
+  const events = await collect(provider.chatStream({ model: 'm', messages: [] }));
+  const done = events[events.length - 1];
+  assert.equal(done.type, 'done');
+  if (done.type !== 'done') return;
+  assert.equal(done.result.reasoning, 'Let me think.');
+  assert.deepEqual(done.result.reasoningDetails, [
+    { type: 'reasoning.text', text: 'Let me think.', id: 'r1', format: 'anthropic-claude-v1', index: 0, signature: 'sig' },
+    { type: 'reasoning.encrypted', data: 'xyz', id: 'r2', format: 'anthropic-claude-v1', index: 1 }
+  ]);
+});
+
+test('chat (non-streaming) keeps reasoning_details as sent', async () => {
+  const details = [{ type: 'reasoning.summary', summary: 'short', id: 's1', format: 'openai-responses-v1', index: 0 }];
+  const { client } = fakeClient([
+    { model: 'm', choices: [{ message: { role: 'assistant', content: 'Hi', reasoning_details: details }, finish_reason: 'stop' }], usage: {} }
+  ]);
+  const provider = new OpenRouterProvider({ apiKey: 'test', client });
+  const result = await provider.chat({ model: 'm', messages: [] });
+  assert.deepEqual(result.reasoningDetails, details);
+  assert.equal(result.reasoning, undefined);
+});
+
+test('mergeReasoningDetails keeps separate indexes and non-text items apart', () => {
+  const acc: unknown[] = [];
+  mergeReasoningDetails(acc, [{ type: 'reasoning.text', text: 'a', index: 0 }]);
+  mergeReasoningDetails(acc, [{ type: 'reasoning.text', text: 'b', index: 0 }, { type: 'reasoning.text', text: 'c', index: 1 }]);
+  mergeReasoningDetails(acc, [{ type: 'reasoning.summary', summary: 's', index: 2 }, 'junk', { type: 'reasoning.text', text: 'd', index: 2 }]);
+  assert.deepEqual(acc, [
+    { type: 'reasoning.text', text: 'ab', index: 0 },
+    { type: 'reasoning.text', text: 'c', index: 1 },
+    { type: 'reasoning.summary', summary: 's', index: 2 },
+    { type: 'reasoning.text', text: 'd', index: 2 }
+  ]);
+});
+
+test('toWireMessages replays reasoning only with tool calls, structured details first', () => {
+  const call: ChatToolCall = { id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } };
+  const details = [{ type: 'reasoning.text', text: 'why', index: 0 }];
+  const wire = toWireMessages([
+    message({ id: 'a1', role: 'assistant', content: 'plain', reasoning: 'ignored' }),
+    message({ id: 'a2', role: 'assistant', content: '', toolCalls: [call], reasoning: 'why', reasoningDetails: details }),
+    message({ id: 't2', role: 'tool', content: 'r', toolCallId: 'c1' }),
+    message({ id: 'a3', role: 'assistant', content: '', toolCalls: [call], reasoning: 'text only' })
+  ]);
+  assert.deepEqual(wire, [
+    { role: 'assistant', content: 'plain' },
+    { role: 'assistant', content: '', tool_calls: [call], reasoning_details: details },
+    { role: 'tool', tool_call_id: 'c1', content: 'r' },
+    { role: 'assistant', content: '', tool_calls: [call], reasoning: 'text only' }
+  ]);
 });
 
 test('fromEnv returns null without a key', () => {
