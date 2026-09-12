@@ -1,10 +1,12 @@
 // Shared types and utilities for Joseki
 
 import type { MergePatch } from './patch';
+import { DEFAULT_WORKFLOW_MODEL } from './models';
 export { createExampleWorkflow } from './exampleWorkflow';
 export * from './validate';
 export * from './chat';
 export * from './patch';
+export * from './models';
 
 // ==================== Workflow Types ====================
 
@@ -106,8 +108,6 @@ export interface HumanGateConfig {
 export const DEFAULT_GATE_TIMEOUT_SECONDS = 3600;
 export const DEFAULT_MAX_REVISIONS = 3;
 
-/** The model a new prompt node starts with — an OpenRouter slug, like every model id in a workflow. */
-export const DEFAULT_WORKFLOW_MODEL = 'openai/gpt-4o-mini';
 
 export type GateVerdict = 'pass' | 'fail';
 

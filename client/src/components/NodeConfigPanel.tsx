@@ -159,14 +159,14 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
 
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">
-                Temperature: {config.temperature || 0.7}
+                Temperature: {config.temperature ?? 0.7}
               </label>
               <input
                 type="range"
                 min="0"
                 max="2"
                 step="0.1"
-                value={config.temperature || 0.7}
+                value={config.temperature ?? 0.7}
                 onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
                 className="w-full"
               />

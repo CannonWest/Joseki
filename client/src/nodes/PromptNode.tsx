@@ -55,7 +55,7 @@ const PromptNode = memo(({ id, data, selected }: NodeProps) => {
         
         <div className="flex items-center justify-between text-xs">
           <span className="text-slate-500">Temperature</span>
-          <span className="text-slate-300">{config.temperature || 0.7}</span>
+          <span className="text-slate-300">{config.temperature ?? 0.7}</span>
         </div>
 
         <div className="flex items-center justify-between text-xs">

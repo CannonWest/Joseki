@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateWorkflow, validateWorkflowStructure } = require('../dist/validate.js');
+const { createExampleWorkflow } = require('../dist/index.js');
 
 function node(id, type, config = {}) {
   return { id, type, position: { x: 0, y: 0 }, data: { label: id, config } };
@@ -143,4 +144,11 @@ test('a gate with no fail arrow is warned about, not rejected', () => {
   const result = validateWorkflow(wf);
   assert.equal(result.valid, true);
   assert.ok(result.warnings.some((w) => w.includes('Human gate "gate" has no fail arrow')));
+});
+
+test('the shipped example workflow validates with no errors and no warnings', () => {
+  const result = validateWorkflow(createExampleWorkflow());
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.valid, true);
 });

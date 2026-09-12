@@ -54,6 +54,7 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
     }));
   },
 
+  // A node that starts again (sent back by a gate) streams from scratch.
   setNodeStatus: (nodeId, status, trace) => {
     set((state) => {
       const newStates = new Map(state.nodeStates);
@@ -62,7 +63,7 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       newStates.set(nodeId, {
         status,
         trace,
-        streamingContent: existing?.streamingContent || ''
+        streamingContent: status === 'running' ? '' : existing?.streamingContent || ''
       });
 
       return { nodeStates: newStates };

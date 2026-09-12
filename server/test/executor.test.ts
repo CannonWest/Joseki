@@ -334,8 +334,9 @@ test('the example workflow runs to the end and Final Output is what the editor a
   const h = harness(wf, { inputs: { example_input: 'An article about rivers.' } }, pass);
   const ctx = await h.run();
 
-  // Draft really receives the article now.
+  // Draft really receives the article now, and no note on the first pass.
   assert.equal(h.llm.calls[0].userPrompt, 'An article about rivers.');
+  assert.ok(!h.llm.calls[0].systemPrompt.includes('sent your previous draft back'));
   // Quality Check is hard-wired to "Needs Revision", so the skip path never runs.
   assert.equal(ctx.example_quality_check.output, 'false');
   assert.ok(h.started.includes('example_revision'));
@@ -343,6 +344,25 @@ test('the example workflow runs to the end and Final Output is what the editor a
   assert.equal(ctx.example_merge.output, ctx.example_revision.output);
   assert.equal(h.paused[0].content, ctx.example_merge.output);
   assert.equal(ctx.example_editor_review.output, ctx.example_merge.output);
+  assert.equal(ctx.example_output.output, ctx.example_merge.output);
+  assert.equal(h.completed.at(-1)?.nodeId, 'example_output');
+});
+
+test('sending the example back re-drafts with the note, and the second approval reaches Final Output', async () => {
+  const decisions: GateDecision[] = [{ verdict: 'fail', note: 'one paragraph, please' }, { verdict: 'pass' }];
+  const h = harness(createExampleWorkflow(), { inputs: { example_input: 'An article about rivers.' } }, (_e, i) => decisions[i]);
+  const ctx = await h.run();
+
+  const draftCalls = h.llm.calls.filter((c) => c.systemPrompt.startsWith('You are a skilled editor'));
+  assert.equal(draftCalls.length, 2, 'Draft Summary ran twice');
+  assert.ok(!draftCalls[0].systemPrompt.includes('one paragraph, please'));
+  assert.ok(draftCalls[1].systemPrompt.includes('sent your previous draft back with this note: "one paragraph, please"'));
+  assert.equal(draftCalls[1].userPrompt, 'An article about rivers.', 'the article itself is unchanged');
+  // Everything after Draft ran again; the input did not.
+  assert.equal(h.started.filter((id) => id === 'example_input').length, 1);
+  assert.equal(h.started.filter((id) => id === 'example_revision').length, 2);
+  assert.equal(h.paused.length, 2);
+  assert.equal(h.paused[1].revision, 1);
   assert.equal(ctx.example_output.output, ctx.example_merge.output);
   assert.equal(h.completed.at(-1)?.nodeId, 'example_output');
 });

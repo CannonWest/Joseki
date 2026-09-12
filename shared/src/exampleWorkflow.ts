@@ -4,6 +4,10 @@
  * Demonstrates a realistic AI orchestration with 6 node types:
  * Input → Prompt (Draft) → Branch (Quality) → Prompt (Revision) → Aggregate → Human Gate → Output
  *
+ * The gate has two ways out: pass goes to the output, fail goes back to
+ * Draft Summary for another pass, up to the gate's maxRevisions. When the
+ * reviewer leaves a note, the redraft sees it.
+ *
  * Users can load this from the welcome screen to explore Joseki's capabilities.
  */
 
@@ -16,6 +20,7 @@ import type {
   AggregateConfig,
   HumanGateConfig,
 } from './index';
+import { DEFAULT_WORKFLOW_MODEL } from './models';
 
 // Stable IDs for deterministic Handlebars template references
 const INPUT_ID = 'example_input';
@@ -50,9 +55,13 @@ export function createExampleWorkflow(): Workflow {
         config: {
           systemPrompt:
             'You are a skilled editor. Summarize the provided article in 2-3 concise paragraphs. ' +
-            'Focus on the key points and maintain an objective tone.',
+            'Focus on the key points and maintain an objective tone.' +
+            '{{#if nodes.' + GATE_ID + '.decision.note}}' +
+            '\n\nThe editor sent your previous draft back with this note: ' +
+            '"{{nodes.' + GATE_ID + '.decision.note}}". Address it in this draft.' +
+            '{{/if}}',
           userPrompt: '{{input}}',
-          model: 'gpt-4',
+          model: DEFAULT_WORKFLOW_MODEL,
           temperature: 0.5,
           maxTokens: 1024,
         } as PromptConfig,
@@ -85,7 +94,7 @@ export function createExampleWorkflow(): Workflow {
             'Rewrite it to be clearer, more concise, and more accurate. ' +
             'Preserve all key facts while improving readability.',
           userPrompt: '{{nodes.' + DRAFT_ID + '.output}}',
-          model: 'gpt-4-turbo',
+          model: DEFAULT_WORKFLOW_MODEL,
           temperature: 0.3,
           maxTokens: 1024,
         } as PromptConfig,
@@ -111,9 +120,10 @@ export function createExampleWorkflow(): Workflow {
         label: 'Editor Review',
         config: {
           instructions:
-            'Review the summarized content. Edit if needed, then approve to publish.',
+            'Review the summary. Approve to publish, or send it back with a note for another draft.',
           allowEdit: true,
           timeout: 3600,
+          maxRevisions: 3,
         } as HumanGateConfig,
       },
     },
@@ -163,9 +173,16 @@ export function createExampleWorkflow(): Workflow {
       target: GATE_ID,
     },
     {
-      id: 'edge_gate_to_output',
+      id: 'edge_gate_pass_to_output',
       source: GATE_ID,
       target: OUTPUT_ID,
+      sourceHandle: 'pass',
+    },
+    {
+      id: 'edge_gate_fail_to_draft',
+      source: GATE_ID,
+      target: DRAFT_ID,
+      sourceHandle: 'fail',
     },
   ];
 
