@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExecutionTrace, ExecutionStatus } from '@joseki/shared';
+import type { ExecutionTrace, ExecutionStatus, ExecutionPausedEvent } from '@joseki/shared';
 
 interface NodeExecutionState {
   status: ExecutionStatus;
@@ -12,11 +12,14 @@ interface ExecutionState {
   currentExecutionId: string | null;
   nodeStates: Map<string, NodeExecutionState>;
   logs: Array<{ timestamp: number; message: string; type: 'info' | 'error' | 'success' }>;
-  
+  /** The human gate the run is waiting at, if any. */
+  pendingGate: ExecutionPausedEvent | null;
+
   startExecution: (executionId: string) => void;
-  endExecution: () => void;
+  endExecution: (outcome?: 'success' | 'error') => void;
   setNodeStatus: (nodeId: string, status: ExecutionStatus, trace?: ExecutionTrace) => void;
   appendStreamToken: (nodeId: string, token: string) => void;
+  setPendingGate: (gate: ExecutionPausedEvent | null) => void;
   addLog: (message: string, type: 'info' | 'error' | 'success') => void;
   clearExecution: () => void;
 }
@@ -26,20 +29,28 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   currentExecutionId: null,
   nodeStates: new Map(),
   logs: [],
+  pendingGate: null,
 
   startExecution: (executionId) => {
     set({
       isExecuting: true,
       currentExecutionId: executionId,
       nodeStates: new Map(),
+      pendingGate: null,
       logs: [{ timestamp: Date.now(), message: 'Execution started', type: 'info' }]
     });
   },
 
-  endExecution: () => {
+  // A failed run has already logged its error; only a finished one gets the
+  // closing line.
+  endExecution: (outcome = 'success') => {
     set((state) => ({
       isExecuting: false,
-      logs: [...state.logs, { timestamp: Date.now(), message: 'Execution completed', type: 'success' }]
+      pendingGate: null,
+      logs:
+        outcome === 'success'
+          ? [...state.logs, { timestamp: Date.now(), message: 'Execution completed', type: 'success' }]
+          : state.logs
     }));
   },
 
@@ -47,13 +58,13 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
     set((state) => {
       const newStates = new Map(state.nodeStates);
       const existing = newStates.get(nodeId);
-      
+
       newStates.set(nodeId, {
         status,
         trace,
         streamingContent: existing?.streamingContent || ''
       });
-      
+
       return { nodeStates: newStates };
     });
   },
@@ -62,15 +73,19 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
     set((state) => {
       const newStates = new Map(state.nodeStates);
       const existing = newStates.get(nodeId);
-      
+
       newStates.set(nodeId, {
         status: 'running',
         streamingContent: (existing?.streamingContent || '') + token,
         trace: existing?.trace
       });
-      
+
       return { nodeStates: newStates };
     });
+  },
+
+  setPendingGate: (gate) => {
+    set({ pendingGate: gate });
   },
 
   addLog: (message, type) => {
@@ -84,6 +99,7 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       isExecuting: false,
       currentExecutionId: null,
       nodeStates: new Map(),
+      pendingGate: null,
       logs: []
     });
   }

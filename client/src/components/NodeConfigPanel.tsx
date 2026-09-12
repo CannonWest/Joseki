@@ -336,14 +336,14 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">
-                Approval Prompt
+                Instructions for the reviewer
               </label>
               <div className="h-32 border border-slate-700 rounded overflow-hidden">
                 <Editor
                   height="100%"
                   defaultLanguage="plaintext"
-                  value={config.approvalPrompt || 'Please review and approve to continue.'}
-                  onChange={(v) => setConfig({ ...config, approvalPrompt: v })}
+                  value={config.instructions ?? config.approvalPrompt ?? ''}
+                  onChange={(v) => setConfig({ ...config, instructions: v ?? '' })}
                   theme="vs-dark"
                   options={{
                     minimap: { enabled: false },
@@ -352,6 +352,48 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                     fontSize: 12
                   }}
                 />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(config.allowEdit)}
+                onChange={(e) => setConfig({ ...config, allowEdit: e.target.checked })}
+              />
+              Reviewer may edit the content before approving
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Max revisions
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={config.maxRevisions ?? 3}
+                  onChange={(e) => setConfig({ ...config, maxRevisions: Number(e.target.value) })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Times the fail arrow may send work back
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Timeout (seconds)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={config.timeout ?? 3600}
+                  onChange={(e) => setConfig({ ...config, timeout: Number(e.target.value) })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  The run fails if nobody decides in time
+                </p>
               </div>
             </div>
           </div>

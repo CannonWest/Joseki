@@ -1,5 +1,6 @@
 interface ToolbarProps {
   onRun: () => void;
+  onStop: () => void;
   isRunning: boolean;
   isConnected: boolean;
   onToggleLog: () => void;
@@ -15,6 +16,7 @@ const secondaryButton =
 
 export function Toolbar({
   onRun,
+  onStop,
   isRunning,
   isConnected,
   onToggleLog,
@@ -69,6 +71,16 @@ export function Toolbar({
       >
         Log
       </button>
+
+      {isRunning && (
+        <button
+          onClick={onStop}
+          className="px-3 py-1.5 text-sm rounded-md bg-red-600/80 hover:bg-red-500 text-white transition-colors"
+          title="Cancel the run"
+        >
+          ■ Stop
+        </button>
+      )}
 
       <button
         onClick={onRun}

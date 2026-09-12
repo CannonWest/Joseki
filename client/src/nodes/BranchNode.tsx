@@ -12,6 +12,7 @@ const BranchNode = memo(({ id, data, selected }: NodeProps) => {
       case 'running': return 'border-blue-500 ring-2 ring-blue-500/30';
       case 'success': return 'border-green-500';
       case 'error': return 'border-red-500';
+      case 'skipped': return 'border-slate-800 opacity-50';
       default: return 'border-slate-700';
     }
   };

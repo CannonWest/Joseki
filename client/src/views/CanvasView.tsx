@@ -35,6 +35,8 @@ import { ExecutionLogPanel } from '../components/ExecutionLogPanel';
 import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
+import { GateDecisionPanel } from '../components/GateDecisionPanel';
+import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
 import { PromptNode } from '../nodes/PromptNode';
 import { BranchNode } from '../nodes/BranchNode';
 import { InputNode } from '../nodes/InputNode';
@@ -63,6 +65,32 @@ interface SelectionBox {
   isSelecting: boolean;
 }
 
+// Arrows out of a branch or a gate carry the handle they leave from, so the
+// canvas shows which way is which.
+const HANDLE_COLORS: Record<string, string> = {
+  pass: '#22c55e',
+  true: '#22c55e',
+  fail: '#ef4444',
+  false: '#ef4444'
+};
+
+function decorateEdge(edge: Edge, nodes: Node[], isSelected: boolean): Edge {
+  const sourceType = nodes.find((n) => n.id === edge.source)?.type;
+  const handle = edge.sourceHandle ?? undefined;
+  const labelled = (sourceType === 'branch' || sourceType === 'human_gate') && handle ? handle : undefined;
+  const color = isSelected ? '#3b82f6' : (labelled && HANDLE_COLORS[labelled]) || '#64748b';
+  return {
+    ...edge,
+    label: labelled,
+    labelStyle: { fill: color, fontSize: 10, fontWeight: 600 },
+    labelBgStyle: { fill: '#0f172a', fillOpacity: 0.9 },
+    labelBgPadding: [4, 2],
+    labelBgBorderRadius: 3,
+    style: { ...edge.style, stroke: color, strokeWidth: isSelected ? 3 : 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, color }
+  };
+}
+
 function Flow({
   openImportOnMount = false,
   onOpenChat
@@ -77,14 +105,15 @@ function Flow({
   const [showLog, setShowLog] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
   const [showImport, setShowImport] = useState(openImportOnMount);
+  const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   
   const flowWrapper = useRef<HTMLDivElement>(null);
   const { project } = useReactFlow();
   
   const { currentWorkflow, setCurrentWorkflow, persistWorkflow } = useWorkflowStore();
-  const { isExecuting, startExecution } = useExecutionStore();
-  const { socket, isConnected } = useSocket();
+  const { isExecuting, startExecution, currentExecutionId, pendingGate } = useExecutionStore();
+  const { socket, isConnected, resumeGate, cancelExecution } = useSocket();
 
   useEffect(() => {
     if (currentWorkflow) {
@@ -285,15 +314,8 @@ function Flow({
     setValidation(result.errors.length || result.warnings.length ? result : null);
   }, [setCurrentWorkflow]);
 
-  const handleRun = useCallback(async () => {
-    const workflow = canvasWorkflow();
-    if (!workflow || !socket) return;
-
-    const result = validateWorkflow(workflow);
-    if (!result.valid) {
-      setValidation(result);
-      return;
-    }
+  const launch = useCallback(async (workflow: Workflow, inputs: Record<string, unknown>) => {
+    if (!socket) return;
 
     // The server executes its stored copy, so the canvas must be saved first.
     try {
@@ -308,11 +330,44 @@ function Flow({
 
     socket.emit('execution:start', {
       workflowId: workflow.id,
-      executionId
+      executionId,
+      inputs
     });
 
     setShowLog(true);
-  }, [canvasWorkflow, socket, persistWorkflow, showFailure, startExecution]);
+  }, [socket, persistWorkflow, showFailure, startExecution]);
+
+  // Run validates the canvas, then asks for each input node's value before
+  // launching — unless there is nothing to ask for.
+  const handleRun = useCallback(() => {
+    const workflow = canvasWorkflow();
+    if (!workflow || !socket) return;
+
+    const result = validateWorkflow(workflow);
+    if (!result.valid) {
+      setValidation(result);
+      return;
+    }
+
+    const inputs: RunInput[] = workflow.nodes
+      .filter((n) => n.type === 'input')
+      .map((n) => {
+        const config = (n.data.config ?? {}) as Record<string, unknown>;
+        return {
+          id: n.id,
+          label: n.data.label,
+          inputType: config.inputType as string | undefined,
+          required: Boolean(config.required),
+          description: config.description as string | undefined,
+          defaultValue: config.defaultValue
+        };
+      });
+    if (inputs.length === 0) {
+      void launch(workflow, {});
+      return;
+    }
+    setRunInputs({ workflow, inputs });
+  }, [canvasWorkflow, socket, launch]);
 
   // Hand unsaved canvas edits to the store before leaving for the chat view,
   // so they are still there when the editor comes back.
@@ -373,7 +428,9 @@ function Flow({
             };
           case 'human_gate':
             return {
-              approvalPrompt: 'Please review and approve to continue.'
+              instructions: 'Review the content, then approve it or send it back.',
+              allowEdit: false,
+              maxRevisions: 3
             };
           default:
             return {};
@@ -420,8 +477,9 @@ function Flow({
       <NodePalette />
       
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Toolbar 
+        <Toolbar
           onRun={handleRun}
+          onStop={() => currentExecutionId && cancelExecution(currentExecutionId)}
           isRunning={isExecuting}
           isConnected={isConnected}
           onToggleLog={() => setShowLog(!showLog)}
@@ -442,18 +500,7 @@ function Flow({
           >
             <ReactFlow
               nodes={nodes}
-              edges={edges.map(edge => ({
-                ...edge,
-                style: {
-                  ...edge.style,
-                  stroke: selectedEdge?.id === edge.id ? '#3b82f6' : '#64748b',
-                  strokeWidth: selectedEdge?.id === edge.id ? 3 : 2
-                },
-                markerEnd: {
-                  type: MarkerType.ArrowClosed,
-                  color: selectedEdge?.id === edge.id ? '#3b82f6' : '#64748b'
-                }
-              }))}
+              edges={edges.map(edge => decorateEdge(edge, nodes, selectedEdge?.id === edge.id))}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -524,6 +571,16 @@ function Flow({
                   </div>
                 </Panel>
               )}
+              {pendingGate && currentExecutionId && (
+                <Panel position="top-right" className="mt-4 mr-4">
+                  <GateDecisionPanel
+                    gate={pendingGate}
+                    label={nodes.find((n) => n.id === pendingGate.nodeId)?.data?.label ?? pendingGate.nodeId}
+                    onDecide={(decision) => resumeGate(currentExecutionId, pendingGate.nodeId, decision)}
+                    onCancel={() => cancelExecution(currentExecutionId)}
+                  />
+                </Panel>
+              )}
             </ReactFlow>
             
             {/* Selection Box Overlay */}
@@ -570,6 +627,17 @@ function Flow({
       )}
       {showImport && (
         <ImportModal onClose={() => setShowImport(false)} onImported={handleImported} />
+      )}
+      {runInputs && (
+        <RunInputsModal
+          inputs={runInputs.inputs}
+          onClose={() => setRunInputs(null)}
+          onRun={(values) => {
+            const { workflow } = runInputs;
+            setRunInputs(null);
+            void launch(workflow, values);
+          }}
+        />
       )}
     </div>
   );
