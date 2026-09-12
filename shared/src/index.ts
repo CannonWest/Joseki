@@ -95,8 +95,26 @@ export interface AggregateConfig {
 
 export interface HumanGateConfig {
   instructions: string;
+  /** The reviewer may replace the content on pass. */
   allowEdit: boolean;
+  /** Seconds to wait for a decision before the run fails. Default DEFAULT_GATE_TIMEOUT_SECONDS. */
   timeout?: number;
+  /** How many times a fail arrow may send work back before the run fails. Default DEFAULT_MAX_REVISIONS. */
+  maxRevisions?: number;
+}
+
+export const DEFAULT_GATE_TIMEOUT_SECONDS = 3600;
+export const DEFAULT_MAX_REVISIONS = 3;
+
+export type GateVerdict = 'pass' | 'fail';
+
+/** What the reviewer decided at a human gate. */
+export interface GateDecision {
+  verdict: GateVerdict;
+  /** Optional reason; templates can read it as {{nodes.<gate>.decision.note}}. */
+  note?: string;
+  /** Replacement content on pass, honoured only when the gate allows edits. */
+  edited?: unknown;
 }
 
 export interface ModelCompareConfig {
@@ -158,7 +176,36 @@ export interface ExecutionContext {
   [nodeId: string]: {
     output: any;
     trace: ExecutionTrace;
+    /** For a human gate: the reviewer's decision, once made. */
+    decision?: GateDecision;
   };
+}
+
+// ==================== Execution Socket Protocol ====================
+//
+// Client → server: `execution:start`, `execution:resume`
+// (ExecutionResumeRequest), `execution:cancel` (executionId).
+// Server → the starting socket: `execution:nodeStart`, `execution:token`,
+// `execution:nodeComplete`, `execution:paused` (ExecutionPausedEvent),
+// `execution:resumed`, `execution:complete`, `execution:error`.
+
+/** The run stopped at a human gate and is waiting for a decision. */
+export interface ExecutionPausedEvent {
+  executionId: string;
+  nodeId: string;
+  /** What the gate received — the thing under review. */
+  content: unknown;
+  instructions: string;
+  allowEdit: boolean;
+  /** How many times this gate has already sent work back in this run. */
+  revision: number;
+  maxRevisions: number;
+}
+
+export interface ExecutionResumeRequest {
+  executionId: string;
+  nodeId: string;
+  decision: GateDecision;
 }
 
 // ==================== Chat Types ====================

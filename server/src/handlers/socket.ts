@@ -1,7 +1,9 @@
 import { Server, Socket } from 'socket.io';
 import { validateWorkflow } from '@joseki/shared';
+import type { ExecutionResumeRequest } from '@joseki/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
+import { gates } from '../engine/gates';
 
 export function setupSocketHandlers(io: Server, db: Database) {
   io.on('connection', (socket: Socket) => {
@@ -77,6 +79,15 @@ export function setupSocketHandlers(io: Server, db: Database) {
           },
           onStreamToken: (nodeId, token) => {
             socket.emit('execution:token', { executionId, nodeId, token });
+          },
+          onPaused: (event) => {
+            db.updateExecutionStatus(executionId, 'paused');
+            socket.emit('execution:paused', event);
+            io.to(`workflow:${workflowId}`).emit('node:status', {
+              executionId,
+              nodeId: event.nodeId,
+              status: 'paused'
+            });
           }
         });
 
@@ -99,28 +110,28 @@ export function setupSocketHandlers(io: Server, db: Database) {
       }
     });
 
-    // Pause execution (for human gate)
-    socket.on('execution:pause', (data: { executionId: string; nodeId: string }) => {
-      const { executionId, nodeId } = data;
-      db.updateExecutionStatus(executionId, 'paused');
-      io.emit('execution:paused', { executionId, nodeId });
-    });
-
-    // Resume execution (after human gate)
-    socket.on('execution:resume', async (data: {
-      executionId: string;
-      nodeId: string;
-      input?: any;
-    }) => {
-      const { executionId, nodeId, input } = data;
-      
-      // Resume execution with provided input
-      socket.emit('execution:resumed', { executionId, nodeId });
+    // Deliver the reviewer's decision to the gate the run is waiting at.
+    // The run itself carries on inside the execution:start handler above.
+    socket.on('execution:resume', (data: ExecutionResumeRequest) => {
+      const { executionId, nodeId, decision } = data;
+      if (!gates.resolve(executionId, nodeId, decision)) {
+        socket.emit('execution:resumed', {
+          executionId,
+          nodeId,
+          ok: false,
+          error: `Nothing is waiting at gate ${nodeId} of execution ${executionId}`
+        });
+        return;
+      }
+      db.updateExecutionStatus(executionId, 'running');
+      socket.emit('execution:resumed', { executionId, nodeId, ok: true });
       io.emit('execution:status', { executionId, status: 'running' });
     });
 
-    // Cancel execution
+    // Cancel execution. A run waiting at a gate fails there; one inside a
+    // model call is only marked, since the call cannot be aborted yet.
     socket.on('execution:cancel', (executionId: string) => {
+      gates.cancel(executionId, 'Cancelled by user');
       db.updateExecutionStatus(executionId, 'error', 'Cancelled by user', Date.now());
       io.emit('execution:cancelled', { executionId });
     });

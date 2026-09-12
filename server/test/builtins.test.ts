@@ -205,3 +205,19 @@ test('run_workflow reports an engine that cannot start', async () => {
   assert.equal(result.errorType, 'engine_unavailable');
   assert.match(result.content, /OPENAI_API_KEY/);
 });
+
+test('run_workflow refuses a workflow with a human gate instead of waiting', async () => {
+  const { db, context } = setup();
+  db.createWorkflow(
+    workflow(
+      'wf-gated',
+      'Gated Flow',
+      [node('q', 'input', 'Question'), node('g', 'human_gate', 'Editor'), node('out', 'output', 'Result')],
+      [edge('e1', 'q', 'g'), edge('e2', 'g', 'out')]
+    )
+  );
+  const result = await runWorkflow.execute({ workflow: 'Gated Flow', inputs: { Question: 'x' } }, context);
+  assert.equal(result.isError, true);
+  assert.equal(result.errorType, 'needs_human');
+  assert.match(result.content, /human gate "Editor"/);
+});

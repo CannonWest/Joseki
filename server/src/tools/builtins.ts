@@ -70,6 +70,15 @@ export const runWorkflow: ToolDefinition = {
       return fail(`Workflow "${workflow.name}" cannot run: ${validation.errors.join('; ')}`, 'invalid_workflow');
     }
 
+    // A tool call answers within the turn; it cannot wait for a person.
+    const gate = workflow.nodes.find((node) => node.type === 'human_gate');
+    if (gate) {
+      return fail(
+        `Workflow "${workflow.name}" stops at the human gate "${gate.data.label}" for a person's decision; run it from the editor instead.`,
+        'needs_human'
+      );
+    }
+
     const seeded = seedInputs(workflow, args.inputs);
     if ('error' in seeded) return fail(seeded.error, 'invalid_arguments');
 

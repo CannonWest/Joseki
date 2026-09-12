@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "smoke:chat": "tsx scripts/chat-smoke.ts",
     "smoke:tools": "tsx scripts/tools-smoke.ts",
+    "smoke:gate": "tsx scripts/gate-smoke.ts",
     "probe:reasoning": "tsx scripts/reasoning-probe.ts"
   },
   "dependencies": {

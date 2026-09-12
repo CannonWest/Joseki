@@ -3,13 +3,16 @@ import type {
   WorkflowNode,
   WorkflowEdge,
   ExecutionContext,
-  ExecutionTrace
+  ExecutionTrace,
+  ExecutionPausedEvent,
+  GateDecision
 } from '@joseki/shared';
-import { calculateCost } from '@joseki/shared';
+import { calculateCost, DEFAULT_GATE_TIMEOUT_SECONDS, DEFAULT_MAX_REVISIONS } from '@joseki/shared';
 import Handlebars from 'handlebars';
 import { Parser as ExprParser } from 'expr-eval';
 import { LLMAdapter } from '../adapters/llm';
 import { Database } from '../db/database';
+import { GateRegistry, gates as sharedGates } from './gates';
 
 // Create a single parser instance for safe branch condition evaluation
 const safeExprParser = new ExprParser();
@@ -24,9 +27,13 @@ export interface ExecutionOptions {
   /** Values for input nodes, by node id. Falls back to each node's defaultValue. */
   inputs?: Record<string, unknown>;
   parentExecutionId?: string;
+  /** Where human gates wait for their decision. Defaults to the shared registry. */
+  gates?: GateRegistry;
   onNodeStart?: (nodeId: string) => void;
   onNodeComplete?: (nodeId: string, trace: ExecutionTrace) => void;
   onStreamToken?: (nodeId: string, token: string) => void;
+  /** The run stopped at a human gate and is waiting. */
+  onPaused?: (event: ExecutionPausedEvent) => void;
 }
 
 /** One upstream output feeding a node, in the order of the arrows into it. */
@@ -60,6 +67,12 @@ export class NodeFailedError extends Error {
   }
 }
 
+interface RunState {
+  executionId: string;
+  /** For a human gate: how many times it has already sent work back. */
+  revision: number;
+}
+
 interface NodeResult {
   trace: ExecutionTrace;
   /**
@@ -67,6 +80,8 @@ interface NodeResult {
    * output and every arrow out of it fires.
    */
   selectedHandle?: string;
+  /** For a human gate: what the reviewer decided. */
+  decision?: GateDecision;
 }
 
 export class WorkflowExecutor {
@@ -87,6 +102,11 @@ export class WorkflowExecutor {
    * branch waits for exactly the paths that were chosen and no longer.
    * Nodes with several outputs (branch, human gate) choose one handle and
    * only the arrows on that handle fire.
+   *
+   * An arrow that points backwards — a gate's fail arrow sending work back
+   * — is a trigger, not a dependency: its target never waits on it and is
+   * not fed by it. When it fires, the target and everything downstream of
+   * it are re-run, up to the gate's maxRevisions.
    */
   async execute(
     workflow: Workflow,
@@ -104,11 +124,36 @@ export class WorkflowExecutor {
       if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
       outgoing.get(edge.source)!.push(edge);
     }
+    const downstreamOf = (start: string): Set<string> => {
+      const seen = new Set<string>();
+      const stack = [start];
+      while (stack.length) {
+        const id = stack.pop()!;
+        for (const edge of outgoing.get(id) ?? []) {
+          if (!seen.has(edge.target)) {
+            seen.add(edge.target);
+            stack.push(edge.target);
+          }
+        }
+      }
+      return seen;
+    };
+    // On a cycle every arrow's target reaches its source, so "points
+    // backwards" alone does not single out the arrow that closes the loop.
+    // The validator's rule does: only a gate's fail arrow may.
+    const backEdges = new Set(
+      workflow.edges
+        .filter(e => nodeMap.get(e.source)?.type === 'human_gate' && e.sourceHandle === 'fail')
+        .filter(e => downstreamOf(e.target).has(e.source))
+        .map(e => e.id)
+    );
+    const forwardIn = (nodeId: string) => (incoming.get(nodeId) ?? []).filter(e => !backEdges.has(e.id));
+
     const edgeState = new Map<string, EdgeState>();
 
     const startNodes = options.startNodeId
       ? [options.startNodeId]
-      : workflow.nodes.filter(n => !incoming.has(n.id)).map(n => n.id);
+      : workflow.nodes.filter(n => forwardIn(n.id).length === 0).map(n => n.id);
 
     // A run that starts mid-graph gets its upstream from the supplied
     // context; arrows out of those nodes count as taken.
@@ -121,15 +166,40 @@ export class WorkflowExecutor {
     const done = new Set<string>();
     const touched = new Set<string>(startNodes);
     const queue = [...startNodes];
+    const revisions = new Map<string, number>();
 
-    const resolveOutgoing = (node: WorkflowNode, selected: string | undefined | typeof NO_HANDLE) => {
-      for (const edge of outgoing.get(node.id) ?? []) {
-        edgeState.set(edge.id, edgeTaken(node, edge, selected) ? 'taken' : 'dead');
-        if (!done.has(edge.target) && !queue.includes(edge.target)) {
-          queue.push(edge.target);
-          touched.add(edge.target);
-        }
+    const enqueue = (nodeId: string) => {
+      if (!done.has(nodeId) && !queue.includes(nodeId)) {
+        queue.push(nodeId);
+        touched.add(nodeId);
       }
+    };
+
+    /** Marks the node's arrows; returns the ones that fired. */
+    const resolveOutgoing = (node: WorkflowNode, selected: string | undefined | typeof NO_HANDLE) => {
+      const fired: WorkflowEdge[] = [];
+      for (const edge of outgoing.get(node.id) ?? []) {
+        const taken = edgeTaken(node, edge, selected);
+        edgeState.set(edge.id, taken ? 'taken' : 'dead');
+        if (taken) fired.push(edge);
+        if (!backEdges.has(edge.id)) enqueue(edge.target);
+      }
+      return fired;
+    };
+
+    /**
+     * Forget that `target` and everything after it ran, so they run again.
+     * Their outputs stay in the context until overwritten, so the next lap
+     * can read the gate's decision.
+     */
+    const rework = (target: string) => {
+      const again = downstreamOf(target);
+      again.add(target);
+      for (const id of again) {
+        done.delete(id);
+        for (const edge of outgoing.get(id) ?? []) edgeState.delete(edge.id);
+      }
+      enqueue(target);
     };
 
     while (queue.length > 0) {
@@ -139,7 +209,7 @@ export class WorkflowExecutor {
       const node = nodeMap.get(nodeId);
       if (!node) continue;
 
-      const inEdges = incoming.get(nodeId) ?? [];
+      const inEdges = forwardIn(nodeId);
       // Not ready yet; the arrow that resolves last will queue it again.
       if (inEdges.some(e => (edgeState.get(e.id) ?? 'pending') === 'pending')) continue;
 
@@ -160,9 +230,10 @@ export class WorkflowExecutor {
         nodeId: e.source,
         output: context[e.source]?.output
       }));
-      const { trace, selectedHandle } = await this.executeNode(node, inputs, context, executionId, options);
+      const run: RunState = { executionId, revision: revisions.get(nodeId) ?? 0 };
+      const { trace, selectedHandle, decision } = await this.executeNode(node, inputs, context, run, options);
 
-      context[nodeId] = { output: trace.output, trace };
+      context[nodeId] = decision ? { output: trace.output, trace, decision } : { output: trace.output, trace };
       this.db.createExecutionTrace({ ...trace, executionId, nodeId });
       options.onNodeComplete?.(nodeId, trace);
 
@@ -173,7 +244,25 @@ export class WorkflowExecutor {
         throw new NodeFailedError(nodeId, context, `Node "${node.data.label}" (${nodeId}) failed: ${trace.error}`);
       }
 
-      resolveOutgoing(node, selectedHandle);
+      const fired = resolveOutgoing(node, selectedHandle);
+
+      if (decision?.verdict === 'fail') {
+        if (fired.length === 0) {
+          throw new Error(`Rejected at "${node.data.label}" (${nodeId}): the gate has no fail arrow to follow`);
+        }
+        const sentBack = fired.filter(e => backEdges.has(e.id));
+        if (sentBack.length) {
+          const limit: number = (node.data.config as any).maxRevisions ?? DEFAULT_MAX_REVISIONS;
+          const count = run.revision + 1;
+          if (count > limit) {
+            throw new Error(
+              `"${node.data.label}" (${nodeId}) sent the work back ${count} times; maxRevisions is ${limit}`
+            );
+          }
+          revisions.set(nodeId, count);
+          for (const edge of sentBack) rework(edge.target);
+        }
+      }
     }
 
     // Anything an arrow reached but that never became ready is waiting on an
@@ -206,7 +295,7 @@ export class WorkflowExecutor {
     node: WorkflowNode,
     inputs: NodeInput[],
     context: ExecutionContext,
-    runId: string,
+    run: RunState,
     options: ExecutionOptions
   ): Promise<NodeResult> {
     const startTime = Date.now();
@@ -217,6 +306,7 @@ export class WorkflowExecutor {
       let tokenUsage = { prompt: 0, completion: 0, total: 0 };
       let model: string | undefined;
       let selectedHandle: string | undefined;
+      let decision: GateDecision | undefined;
 
       switch (node.type) {
         case 'prompt': {
@@ -241,10 +331,16 @@ export class WorkflowExecutor {
           output = await this.executeAggregateNode(node, inputs);
           break;
 
-        case 'human_gate':
-          output = await this.executeHumanGateNode(node, inputs);
-          selectedHandle = 'pass';
+        case 'human_gate': {
+          const gate = await this.executeHumanGateNode(node, inputs, run, options);
+          output = gate.output;
+          decision = gate.decision;
+          selectedHandle = decision.verdict;
+          // The decision is the reviewer's input to the gate; it belongs
+          // with the persisted trace.
+          input.decision = decision;
           break;
+        }
 
         case 'model_compare':
           output = await this.executeModelCompareNode(node, inputs, context);
@@ -276,7 +372,7 @@ export class WorkflowExecutor {
 
       return {
         trace: {
-          runId,
+          runId: run.executionId,
           timestamp: startTime,
           input,
           output,
@@ -286,13 +382,14 @@ export class WorkflowExecutor {
           status: 'success',
           model
         },
-        selectedHandle
+        selectedHandle,
+        decision
       };
 
     } catch (error) {
       return {
         trace: {
-          runId,
+          runId: run.executionId,
           timestamp: startTime,
           input,
           output: null,
@@ -358,7 +455,7 @@ export class WorkflowExecutor {
   /**
    * What a template can see: `input` (the first arrow's output, as text),
    * `inputs` (every arrow's output by source node id) and `nodes` (the whole
-   * run so far, for {{nodes.<id>.output}}).
+   * run so far, for {{nodes.<id>.output}} and {{nodes.<gate>.decision.note}}).
    */
   private templateData(inputs: NodeInput[], context: ExecutionContext) {
     const byNode: Record<string, unknown> = {};
@@ -439,13 +536,45 @@ export class WorkflowExecutor {
     }
   }
 
+  /**
+   * Stops the run until a person decides. The content under review is what
+   * arrived on the arrows in; on pass it goes on unchanged, or replaced by
+   * the reviewer's edit when the gate allows edits. On fail the content
+   * still goes on, down the fail arrows. A timeout or a cancel rejects the
+   * wait, which fails the node and so the run.
+   */
   private async executeHumanGateNode(
     node: WorkflowNode,
-    inputs: NodeInput[]
-  ): Promise<any> {
-    // The gate hands its input on unchanged. Pausing for a decision is the
-    // next step; until then every gate passes.
-    return inputs.length === 1 ? inputs[0].output : inputs.map(i => i.output);
+    inputs: NodeInput[],
+    run: RunState,
+    options: ExecutionOptions
+  ): Promise<{ output: unknown; decision: GateDecision }> {
+    const config = node.data.config as any;
+    const content = inputs.length === 1 ? inputs[0].output : inputs.map(i => i.output);
+    const maxRevisions: number = config.maxRevisions ?? DEFAULT_MAX_REVISIONS;
+    const timeoutSeconds: number = config.timeout ?? DEFAULT_GATE_TIMEOUT_SECONDS;
+
+    options.onPaused?.({
+      executionId: run.executionId,
+      nodeId: node.id,
+      content,
+      instructions: config.instructions ?? '',
+      allowEdit: Boolean(config.allowEdit),
+      revision: run.revision,
+      maxRevisions
+    });
+
+    const registry = options.gates ?? sharedGates;
+    const decision = await registry.wait(run.executionId, node.id, timeoutSeconds * 1000);
+    if (decision.verdict !== 'pass' && decision.verdict !== 'fail') {
+      throw new Error(`Gate decision must be "pass" or "fail", got ${JSON.stringify(decision.verdict)}`);
+    }
+
+    const output =
+      decision.verdict === 'pass' && config.allowEdit && decision.edited !== undefined
+        ? decision.edited
+        : content;
+    return { output, decision };
   }
 
   private async executeModelCompareNode(

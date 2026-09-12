@@ -123,7 +123,11 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
     if (ok) validEdges.push(edge);
   }
 
-  const cycleMembers = findCycleMembers(nodeIds, validEdges);
+  // Only a human gate's fail arrow may point backwards: it sends work back
+  // for another pass and the executor re-runs from there. Any other cycle
+  // never terminates.
+  const forwardEdges = validEdges.filter((edge) => !isReworkEdge(edge, nodeById));
+  const cycleMembers = findCycleMembers(nodeIds, forwardEdges);
   if (cycleMembers.length) {
     errors.push(`Dependency cycle involving: ${cycleMembers.join(', ')}`);
   }
@@ -158,12 +162,21 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
       case 'branch':
         if (!config.condition) warnings.push(`Branch node "${node.id}" has no condition`);
         break;
+      case 'human_gate':
+        if (!validEdges.some((edge) => edge.source === node.id && edge.sourceHandle === 'fail')) {
+          warnings.push(`Human gate "${node.id}" has no fail arrow: a rejection ends the run`);
+        }
+        break;
     }
   }
   if (nodes.length > 0 && !hasInput) warnings.push('Workflow has no input node');
   if (nodes.length > 0 && !hasOutput) warnings.push('Workflow has no output node');
 
   return { valid: errors.length === 0, errors, warnings };
+}
+
+function isReworkEdge(edge: WorkflowEdge, nodeById: Map<string, WorkflowNode>): boolean {
+  return nodeById.get(edge.source)?.type === 'human_gate' && edge.sourceHandle === 'fail';
 }
 
 function checkTemplateRefs(

@@ -107,3 +107,40 @@ test('structure check rejects non-objects and malformed nodes', () => {
 test('structure check accepts a real workflow', () => {
   assert.deepEqual(validateWorkflowStructure(linear()), { ok: true, errors: [] });
 });
+
+const gated = (backHandle) =>
+  workflow(
+    [
+      node('in', 'input'),
+      node('draft', 'prompt', { model: 'gpt-4', userPrompt: '{{input}}' }),
+      node('gate', 'human_gate', { instructions: 'look' }),
+      node('out', 'output'),
+    ],
+    [
+      edge('e1', 'in', 'draft'),
+      edge('e2', 'draft', 'gate'),
+      { id: 'e3', source: 'gate', target: 'out', sourceHandle: 'pass' },
+      { id: 'e4', source: 'gate', target: 'draft', sourceHandle: backHandle },
+    ]
+  );
+
+test('a human gate may send work back: its fail arrow closing a cycle is not an error', () => {
+  const result = validateWorkflow(gated('fail'));
+  assert.equal(result.valid, true, result.errors.join('; '));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('a gate pass arrow pointing backwards is still a cycle', () => {
+  const result = validateWorkflow(gated('pass'));
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.startsWith('Dependency cycle')));
+});
+
+test('a gate with no fail arrow is warned about, not rejected', () => {
+  const wf = gated('fail');
+  wf.edges = wf.edges.filter((e) => e.id !== 'e4');
+  const result = validateWorkflow(wf);
+  assert.equal(result.valid, true);
+  assert.ok(result.warnings.some((w) => w.includes('Human gate "gate" has no fail arrow')));
+});
