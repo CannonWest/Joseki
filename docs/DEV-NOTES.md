@@ -3,30 +3,36 @@
 Things that cost someone an hour once. The README says what Joseki does; this
 says what working on it is like.
 
-## A `shared` runtime change needs the client's dep cache cleared
+## `shared` is source to the client, and that is deliberate
 
-Vite pre-bundles `@joseki/shared` **once**, at dev-server startup, and caches
-the result in `client/node_modules/.vite`. Add a runtime export to `shared` —
-a `const`, a function, anything with a value — and a client started before
-that change keeps serving the old bundle. The page renders blank with
-`does not provide an export named …`, while `tsc` passes happily against the
-freshly rebuilt `shared/dist`. It has bitten twice.
+`client/vite.config.ts` aliases `@joseki/shared` to `../shared/src/index.ts`,
+so the client reads shared's **TypeScript source** and transforms it like any
+file in the app. Edit shared, and the page has it — no rebuild, no restart.
+(The *server* is different: it imports the built package, so `npm run
+build:shared` is still what it reads, and the tests read it too.)
 
-So after a runtime change to `shared`: rebuild it, then restart the client
-with the cache dropped.
+The config also says `optimizeDeps: { exclude: ['@joseki/shared'] }`, and that
+line is load-bearing. It used to say `include`, which fought the alias and
+won: Vite pre-bundled shared into `node_modules/.vite/deps`, and it
+invalidates a linked package on its manifest, never its contents — so the
+snapshot froze at whatever shared exported when the cache was built. Add an
+export, and the view went **blank** with
 
-```bash
-npm run build:shared
-cd client && npx vite --force     # --force re-bundles; rm -rf node_modules/.vite does the same
+```
+The requested module '/node_modules/.vite/deps/@joseki_shared.js'
+does not provide an export named 'DEFAULT_MAX_ATTEMPTS'
 ```
 
-`--force` is the supported flag. (`--cacheDir` is **not** a Vite CLI flag,
-despite reading like one.) A **type-only** addition — an interface, a type
-alias, a new field on an existing interface — needs none of this.
+while `tsc` passed happily against the rebuilt `shared/dist`. It bit three
+times before the cause was found, because clearing the cache by hand makes it
+go away for a while — which reads like a fix and is not one. Do not put
+`include` back.
 
-Related: editing a component and its callers in one pass while that view is
-open in the browser produces a transient crash in the console — HMR swaps
-the modules one at a time, so for a moment a new callee runs against an old
+## A crash right after an edit may be HMR, not the code
+
+Editing a component and its callers in one pass while that view is open in
+the browser produces a transient crash in the console — HMR swaps the
+modules one at a time, so for a moment a new callee runs against an old
 caller (or the reverse). It looks like a real TypeError with a real component
 stack. Reload before believing it; if it survives the reload, it is real.
 
@@ -63,6 +69,9 @@ JOSEKI_SERVER_URL=http://localhost:3011 npx vite --port 5183
   mount do not survive it — click, then read the page again, then click.
 - Reading the log panel's text out of the DOM is steadier than scrolling it:
   it auto-scrolls to the bottom on every new line.
+- A view that fails to load renders `This view did not load` with the error,
+  not a black screen — `ViewBoundary` wraps both lazy views. A black screen
+  means something failed *outside* them, which is worth knowing.
 - A click on a canvas node sometimes only selects it and sometimes opens its
   config panel. In a batch, probe for the `Node Configuration` heading
   between clicks rather than assuming which one you got.

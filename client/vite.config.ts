@@ -36,6 +36,14 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['@joseki/shared']
+    // The alias above points at shared's TypeScript source, so Vite should
+    // transform it like any file in this app and pick edits up at once.
+    // Pre-bundling it fought that: the dep snapshot froze at whatever shared
+    // exported when the cache was built, and Vite invalidates a linked
+    // package on its manifest, never its contents — so a new export in
+    // shared meant "does not provide an export named ..." until someone
+    // deleted node_modules/.vite by hand. Excluded, there is no snapshot to
+    // go stale.
+    exclude: ['@joseki/shared']
   }
 });

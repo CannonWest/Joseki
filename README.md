@@ -36,7 +36,7 @@ The app will be available at:
 - Frontend: http://localhost:5173
 - Backend: http://localhost:3001
 
-After a **runtime** change to `shared`, rebuild it and restart the client with `npx vite --force`, or the page loads a stale pre-bundle and renders blank. Type-only additions need no restart. That, and the rest of what is worth knowing before changing something, is in [docs/DEV-NOTES.md](docs/DEV-NOTES.md).
+The client reads `shared` as source (Vite aliases it), so an edit there needs no rebuild; the server and the tests read the built package, which is what `npm run build:shared` is for. That, and the rest of what is worth knowing before changing something, is in [docs/DEV-NOTES.md](docs/DEV-NOTES.md).
 
 ## Project Structure
 

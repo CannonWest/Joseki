@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 
 import { useWorkflowStore } from './stores/workflowStore';
 import { createExampleWorkflow } from '@joseki/shared';
+import { ViewBoundary } from './components/ViewBoundary';
 
 // Both heavy surfaces load on demand. The canvas pulls in reactflow, the seven
 // node components and the Monaco-backed config panel; the chat view pulls in
@@ -64,9 +65,11 @@ function App() {
 
   if (view === 'chat') {
     return (
-      <Suspense fallback={<ViewFallback />}>
-        <ChatView onOpenWorkflows={() => setView(currentWorkflow ? 'canvas' : 'welcome')} />
-      </Suspense>
+      <ViewBoundary>
+        <Suspense fallback={<ViewFallback />}>
+          <ChatView onOpenWorkflows={() => setView(currentWorkflow ? 'canvas' : 'welcome')} />
+        </Suspense>
+      </ViewBoundary>
     );
   }
 
@@ -142,15 +145,17 @@ function App() {
   }
 
   return (
-    <Suspense fallback={<ViewFallback />}>
-      <CanvasView
-        openImportOnMount={importOnStart}
-        onOpenChat={() => {
-          setImportOnStart(false);
-          setView('chat');
-        }}
-      />
-    </Suspense>
+    <ViewBoundary>
+      <Suspense fallback={<ViewFallback />}>
+        <CanvasView
+          openImportOnMount={importOnStart}
+          onOpenChat={() => {
+            setImportOnStart(false);
+            setView('chat');
+          }}
+        />
+      </Suspense>
+    </ViewBoundary>
   );
 }
 
