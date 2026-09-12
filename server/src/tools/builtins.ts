@@ -1,7 +1,7 @@
 import { Parser } from 'expr-eval';
 import type { ExecutionContext, Workflow, WorkflowNode } from '@joseki/shared';
 import { generateId, validateWorkflow } from '@joseki/shared';
-import { WorkflowExecutor } from '../engine/executor';
+import { WorkflowExecutor, NodeFailedError } from '../engine/executor';
 import { ToolRegistry, fail, ok, type ToolContext, type ToolDefinition } from './registry';
 
 /**
@@ -95,6 +95,11 @@ export const runWorkflow: ToolDefinition = {
       result = await executor.execute(workflow, executionId, { context: seeded.context });
     } catch (error) {
       db.updateExecutionStatus(executionId, 'error', message(error), Date.now());
+      // A node failure stops the run but leaves a record of what ran; report
+      // that the same way as a completed run.
+      if (error instanceof NodeFailedError) {
+        return formatWorkflowResult(workflow, error.context, Date.now() - startedAt);
+      }
       return fail(`Workflow "${workflow.name}" failed: ${message(error)}`, 'execution_error');
     }
     db.updateExecutionStatus(executionId, 'success', undefined, Date.now());
@@ -210,9 +215,9 @@ function seedInputs(
 
 /**
  * The run, as text for the model: the output-node results first (read from
- * the nodes feeding each output node — the executor's own output-node value
- * is the first successful node's output, which is usually the input), then a
- * per-node roll-call with errors.
+ * the nodes feeding each output node, so a run that stopped before its
+ * output node still shows what reached it), then a per-node roll-call with
+ * errors.
  */
 function formatWorkflowResult(workflow: Workflow, context: ExecutionContext, elapsedMs: number) {
   const traces = workflow.nodes
@@ -231,8 +236,7 @@ function formatWorkflowResult(workflow: Workflow, context: ExecutionContext, ela
   }
   if (outputs.length === 0) {
     // No output node produced anything: fall back to the last node that did
-    // real work (inputs just echo their value; an output node's own value is
-    // the executor's first-success pick).
+    // real work (inputs just echo their value).
     const last = [...traces]
       .reverse()
       .find(

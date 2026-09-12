@@ -110,6 +110,8 @@ export interface InputConfig {
   inputType?: string;
   required?: boolean;
   description?: string;
+  /** Used when the run supplies no value for this input. */
+  defaultValue?: unknown;
 }
 
 export type NodeConfig =
@@ -123,12 +125,14 @@ export type NodeConfig =
 
 // ==================== Execution Types ====================
 
-export type ExecutionStatus = 
-  | 'pending' 
-  | 'running' 
-  | 'success' 
-  | 'error' 
-  | 'paused';
+export type ExecutionStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'error'
+  | 'paused'
+  /** Never ran: every arrow into the node came from a path that was not taken. */
+  | 'skipped';
 
 export interface TokenUsage {
   prompt: number;

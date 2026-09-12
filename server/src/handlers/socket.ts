@@ -19,8 +19,10 @@ export function setupSocketHandlers(io: Server, db: Database) {
       executionId: string;
       startNodeId?: string;
       context?: Record<string, any>;
+      /** Values for input nodes, by node id. */
+      inputs?: Record<string, unknown>;
     }) => {
-      const { workflowId, executionId, startNodeId, context = {} } = data;
+      const { workflowId, executionId, startNodeId, context = {}, inputs } = data;
       
       const workflow = db.getWorkflow(workflowId);
       if (!workflow) {
@@ -55,6 +57,7 @@ export function setupSocketHandlers(io: Server, db: Database) {
         await executor.execute(workflow, executionId, {
           startNodeId,
           context,
+          inputs,
           onNodeStart: (nodeId) => {
             socket.emit('execution:nodeStart', { executionId, nodeId });
             io.to(`workflow:${workflowId}`).emit('node:status', {

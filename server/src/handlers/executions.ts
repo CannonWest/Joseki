@@ -22,6 +22,7 @@ router.post('/:workflowId', async (req, res) => {
   const executionId = generateId();
   const startNodeId = req.body.startNodeId;
   const context = req.body.context || {};
+  const inputs = req.body.inputs;
   
   // Create execution record
   db.createExecution({
@@ -42,7 +43,8 @@ router.post('/:workflowId', async (req, res) => {
   try {
     await executor.execute(workflow, executionId, {
       startNodeId,
-      context
+      context,
+      inputs
     });
     
     db.updateExecutionStatus(executionId, 'success', undefined, Date.now());
