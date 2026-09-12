@@ -2,7 +2,12 @@ import { useState, useMemo, useEffect } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
 import { DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
+import type { OutputFormat } from '@joseki/shared';
 import { useChatStore } from '../stores/chatStore';
+import { useExecutionStore } from '../stores/executionStore';
+import { useWorkflowStore } from '../stores/workflowStore';
+import { OutputResult } from './OutputResult';
+import { OUTPUT_FORMATS } from '../output/format';
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -13,7 +18,7 @@ interface NodeConfigPanelProps {
   onDeleteEdge: (edgeId: string) => void;
 }
 
-type TabType = 'config' | 'connections';
+type TabType = 'config' | 'connections' | 'result';
 
 interface InputReference {
   nodeId: string;
@@ -36,7 +41,13 @@ const typeIcons: Record<string, string> = {
 export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDeleteEdge }: NodeConfigPanelProps) {
   const [config, setConfig] = useState(node.data.config || {});
   const [label, setLabel] = useState(node.data.label);
-  const [activeTab, setActiveTab] = useState<TabType>('config');
+
+  // For an output node the last run's result is the interesting part; open
+  // on it when there is one.
+  const result = useExecutionStore((state) => state.nodeStates.get(node.id)?.trace);
+  const workflowName = useWorkflowStore((state) => state.currentWorkflow?.name ?? 'workflow');
+  const hasResult = node.type === 'output' && result?.status === 'success';
+  const [activeTab, setActiveTab] = useState<TabType>(hasResult ? 'result' : 'config');
 
   // Prompt nodes pick from the OpenRouter catalog the chat surface already
   // loads; any slug can still be typed.
@@ -544,6 +555,34 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
           </div>
         );
 
+      case 'output':
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Result format
+              </label>
+              <select
+                value={config.format ?? 'auto'}
+                onChange={(e) => setConfig({ ...config, format: e.target.value as OutputFormat })}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
+              >
+                {OUTPUT_FORMATS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label} — {f.hint}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                How the result is shown and what a download is saved as.
+              </p>
+            </div>
+            <p className="text-xs text-slate-500">
+              After a run, the Result tab holds what reached this node.
+            </p>
+          </div>
+        );
+
       default:
         return (
           <div className="text-slate-500 text-sm">
@@ -551,6 +590,33 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
           </div>
         );
     }
+  };
+
+  const renderResultTab = () => {
+    if (!result) {
+      return (
+        <div className="text-sm text-slate-500">
+          Run the workflow to see what reaches this node.
+        </div>
+      );
+    }
+    if (result.status !== 'success') {
+      return (
+        <div className="text-sm text-slate-500">
+          This node produced no result on the last run
+          {result.status === 'skipped' ? ' — its path was not taken.' : result.error ? `: ${result.error}` : '.'}
+        </div>
+      );
+    }
+    return (
+      <OutputResult
+        value={result.output}
+        format={config.format}
+        onFormatChange={(format) => setConfig({ ...config, format })}
+        workflowName={workflowName}
+        label={label}
+      />
+    );
   };
 
   const renderConnectionsTab = () => {
@@ -693,6 +759,19 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
             </span>
           )}
         </button>
+        {node.type === 'output' && (
+          <button
+            onClick={() => setActiveTab('result')}
+            className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === 'result'
+                ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800/50'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            Result
+            {hasResult && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500" />}
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -716,7 +795,11 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
         </div>
 
         {/* Tab Content */}
-        {activeTab === 'config' ? renderConfigFields() : renderConnectionsTab()}
+        {activeTab === 'config'
+          ? renderConfigFields()
+          : activeTab === 'connections'
+            ? renderConnectionsTab()
+            : renderResultTab()}
       </div>
 
       <div className="h-16 border-t border-slate-800 flex items-center justify-end px-4 gap-2">

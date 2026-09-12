@@ -135,6 +135,13 @@ export interface InputConfig {
   defaultValue?: unknown;
 }
 
+/** How an output node's result is shown and downloaded. `auto` picks json for objects and arrays, markdown for text. */
+export type OutputFormat = 'auto' | 'text' | 'markdown' | 'json';
+
+export interface OutputConfig {
+  format?: OutputFormat;
+}
+
 export type NodeConfig =
   | PromptConfig
   | BranchConfig
@@ -142,6 +149,7 @@ export type NodeConfig =
   | HumanGateConfig
   | ModelCompareConfig
   | InputConfig
+  | OutputConfig
   | Record<string, never>;
 
 // ==================== Execution Types ====================

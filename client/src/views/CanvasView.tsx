@@ -438,6 +438,8 @@ function Flow({
               allowEdit: false,
               maxRevisions: 3
             };
+          case 'output':
+            return { format: 'auto' };
           default:
             return {};
         }
@@ -605,7 +607,8 @@ function Flow({
           </div>
           
           {selectedNode && (
-            <NodeConfigPanel 
+            <NodeConfigPanel
+              key={selectedNode.id}
               node={selectedNode}
               nodes={nodes}
               edges={edges}
