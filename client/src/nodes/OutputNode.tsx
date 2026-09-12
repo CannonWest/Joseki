@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
 
 const OutputNode = memo(({ data, selected }: NodeProps) => {
