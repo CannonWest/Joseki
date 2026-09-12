@@ -8,6 +8,8 @@ import { useExecutionStore } from '../stores/executionStore';
 import { useWorkflowStore } from '../stores/workflowStore';
 import { OutputResult } from './OutputResult';
 import { OUTPUT_FORMATS } from '../output/format';
+import { ModelPicker } from './chat/ModelPicker';
+import { formatContext, formatPerMillion } from './chat/format';
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -50,12 +52,19 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   const [activeTab, setActiveTab] = useState<TabType>(hasResult ? 'result' : 'config');
 
   // Prompt nodes pick from the OpenRouter catalog the chat surface already
-  // loads; any slug can still be typed.
+  // loads, through the same picker. Any slug can still be typed: a deployment
+  // on OPENAI_API_KEY alone has no catalog to pick from.
   const catalog = useChatStore((state) => state.catalog);
   const loadCatalog = useChatStore((state) => state.loadCatalog);
+  const [showPicker, setShowPicker] = useState(false);
   useEffect(() => {
     if (node.type === 'prompt') void loadCatalog();
   }, [node.type, loadCatalog]);
+  const chosenModel: string = config.model ?? DEFAULT_WORKFLOW_MODEL;
+  const catalogModel = useMemo(
+    () => catalog.find((model) => model.id === chosenModel),
+    [catalog, chosenModel]
+  );
 
   const handleSave = () => {
     onUpdate({ label, config });
@@ -148,24 +157,49 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
               <label className="block text-xs font-medium text-slate-400 mb-1">
                 Model
               </label>
-              <input
-                type="text"
-                list="joseki-workflow-models"
-                value={config.model ?? DEFAULT_WORKFLOW_MODEL}
-                onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                placeholder={DEFAULT_WORKFLOW_MODEL}
-                spellCheck={false}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 font-mono"
-              />
-              <datalist id="joseki-workflow-models">
-                {catalog.map((model) => (
-                  <option key={model.id} value={model.id}>{model.name}</option>
-                ))}
-              </datalist>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chosenModel}
+                  onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                  placeholder={DEFAULT_WORKFLOW_MODEL}
+                  spellCheck={false}
+                  className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPicker(true)}
+                  className="px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300 hover:border-blue-500 transition-colors whitespace-nowrap"
+                  title="Choose from the OpenRouter catalog"
+                >
+                  Choose…
+                </button>
+              </div>
               <p className="text-xs text-slate-500 mt-1">
-                An OpenRouter model id, e.g. <code className="text-slate-400">openai/gpt-4o-mini</code>
-                {catalog.length ? ` — ${catalog.length} in the catalog` : ''}
+                {catalogModel ? (
+                  <>
+                    {catalogModel.name} · {formatContext(catalogModel.contextLength)} ctx ·{' '}
+                    {formatPerMillion(catalogModel.pricing.prompt)} /{' '}
+                    {formatPerMillion(catalogModel.pricing.completion)} per M
+                  </>
+                ) : catalog.length ? (
+                  <span className="text-amber-400/80">Not in the OpenRouter catalog — the gateway will refuse it</span>
+                ) : (
+                  <>
+                    An OpenRouter model id, e.g. <code className="text-slate-400">{DEFAULT_WORKFLOW_MODEL}</code>
+                  </>
+                )}
               </p>
+              {showPicker && (
+                <ModelPicker
+                  current={chosenModel}
+                  onSelect={(id) => {
+                    setConfig({ ...config, model: id });
+                    setShowPicker(false);
+                  }}
+                  onClose={() => setShowPicker(false)}
+                />
+              )}
             </div>
 
             <div>
