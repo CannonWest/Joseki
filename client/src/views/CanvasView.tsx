@@ -44,6 +44,7 @@ import { OutputNode } from '../nodes/OutputNode';
 import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
 import { ModelCompareNode } from '../nodes/ModelCompareNode';
+import { RoutedEdge } from '../edges/RoutedEdge';
 import { validateWorkflow, DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
@@ -55,6 +56,11 @@ const nodeTypes = {
   aggregate: AggregateNode,
   human_gate: HumanGateNode,
   model_compare: ModelCompareNode
+};
+
+// Every edge routes around nodes; see edges/route.ts.
+const edgeTypes = {
+  routed: RoutedEdge
 };
 
 interface SelectionBox {
@@ -130,7 +136,7 @@ function Flow({
         target: e.target,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        type: 'smoothstep',
+        type: 'routed',
         animated: false,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b' }
       })));
@@ -141,7 +147,7 @@ function Flow({
     (connection: Connection) => {
       setEdges((eds) => addEdge({ 
         ...connection, 
-        type: 'smoothstep',
+        type: 'routed',
         markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b' }
       }, eds));
     },
@@ -511,6 +517,7 @@ function Flow({
               onDragOver={onDragOver}
               onMouseDown={handleMouseDown}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               snapToGrid
               snapGrid={[15, 15]}
