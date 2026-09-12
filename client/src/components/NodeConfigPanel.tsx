@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_WORKFLOW_MODEL, MAX_ATTEMPTS } from '@joseki/shared';
@@ -8,8 +8,7 @@ import { useExecutionStore } from '../stores/executionStore';
 import { useWorkflowStore } from '../stores/workflowStore';
 import { OutputResult } from './OutputResult';
 import { OUTPUT_FORMATS } from '../output/format';
-import { ModelPicker } from './chat/ModelPicker';
-import { formatContext, formatPerMillion } from './chat/format';
+import { ModelSelect } from './chat/ModelSelect';
 import { RoutingSection } from './chat/settings/RoutingSection';
 import { SamplingSection } from './chat/settings/SamplingSection';
 import { ReasoningSection } from './chat/settings/ReasoningSection';
@@ -56,15 +55,9 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   const [activeTab, setActiveTab] = useState<TabType>(hasResult ? 'result' : 'config');
 
   // Prompt nodes pick from the OpenRouter catalog the chat surface already
-  // loads, through the same picker. OpenRouter is the only provider, so the
-  // catalog is the whole choice — there is no id worth typing that it lacks.
+  // loads. OpenRouter is the only provider, so the catalog is the whole
+  // choice; ModelSelect owns the two menus, the search and the catalog line.
   const catalog = useChatStore((state) => state.catalog);
-  const catalogStatus = useChatStore((state) => state.catalogStatus);
-  const loadCatalog = useChatStore((state) => state.loadCatalog);
-  const [showPicker, setShowPicker] = useState(false);
-  useEffect(() => {
-    if (node.type === 'prompt') void loadCatalog();
-  }, [node.type, loadCatalog]);
   const chosenModel: string = config.model ?? DEFAULT_WORKFLOW_MODEL;
   const catalogModel = useMemo(
     () => catalog.find((model) => model.id === chosenModel),
@@ -163,44 +156,7 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
       case 'prompt':
         return (
           <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">
-                Model
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowPicker(true)}
-                className="w-full text-left px-3 py-2 bg-slate-800 border border-slate-700 rounded font-mono text-xs text-slate-200 hover:border-blue-500 transition-colors truncate"
-                title="Choose a model from the OpenRouter catalog"
-              >
-                {chosenModel}
-              </button>
-              <p className="text-xs text-slate-500 mt-1">
-                {catalogModel ? (
-                  <>
-                    {catalogModel.name} · {formatContext(catalogModel.contextLength)} ctx ·{' '}
-                    {formatPerMillion(catalogModel.pricing.prompt)} /{' '}
-                    {formatPerMillion(catalogModel.pricing.completion)} per M
-                  </>
-                ) : catalog.length ? (
-                  <span className="text-amber-400/80">Not in the OpenRouter catalog — the gateway will refuse it</span>
-                ) : catalogStatus === 'error' ? (
-                  <span className="text-amber-400/80">Could not load the catalog — is OPENROUTER_API_KEY set?</span>
-                ) : (
-                  <>Loading the catalog…</>
-                )}
-              </p>
-              {showPicker && (
-                <ModelPicker
-                  current={chosenModel}
-                  onSelect={(id) => {
-                    setConfig({ ...config, model: id });
-                    setShowPicker(false);
-                  }}
-                  onClose={() => setShowPicker(false)}
-                />
-              )}
-            </div>
+            <ModelSelect value={chosenModel} onChange={(id) => setConfig({ ...config, model: id })} />
 
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">
