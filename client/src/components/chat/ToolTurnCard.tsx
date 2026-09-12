@@ -1,7 +1,7 @@
 import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
 import type { ToolActivity } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
-import { Meta, Reasoning, assistantMeta } from './MessageBubble';
+import { Meta, Reasoning, assistantMeta, useReplyModel } from './MessageBubble';
 import { formatLatency, prettyJson, truncate } from './format';
 
 interface ToolTurnCardProps {
@@ -31,6 +31,7 @@ const statusLabel: Record<Status, string> = {
 
 /** An assistant turn that called tools: its text, then one row per call with the result. */
 export function ToolTurnCard({ message, results, activity }: ToolTurnCardProps) {
+  const model = useReplyModel(message);
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-[85%] min-w-0 rounded-lg px-4 py-3 border bg-slate-900 border-slate-800 space-y-2">
@@ -44,7 +45,7 @@ export function ToolTurnCard({ message, results, activity }: ToolTurnCardProps) 
             live={activity.find((entry) => entry.callId === call.id)}
           />
         ))}
-        <Meta items={assistantMeta(message)} />
+        <Meta items={assistantMeta(message, model)} />
       </div>
     </div>
   );

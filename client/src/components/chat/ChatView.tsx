@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { activePath } from '@maestroai/shared';
-import type { ChatParams } from '@maestroai/shared';
+import type { ChatParamsPatch } from '@maestroai/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { ConversationList } from './ConversationList';
@@ -9,7 +9,7 @@ import { Composer } from './Composer';
 import { ModelPicker } from './ModelPicker';
 import { ChatSettings } from './ChatSettings';
 import { EditableTitle } from './EditableTitle';
-import { shortModel } from './format';
+import { conversationSpend, formatCost, shortModel } from './format';
 
 interface ChatViewProps {
   onOpenWorkflows: () => void;
@@ -54,10 +54,12 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
   const streaming = useChatStore((state) => state.streaming);
   const generating = useChatStore((state) => state.generating);
   const toolActivity = useChatStore((state) => state.toolActivity);
+  const catalog = useChatStore((state) => state.catalog);
   const error = useChatStore((state) => state.error);
   const {
     checkHealth,
     loadConversations,
+    loadCatalog,
     createConversation,
     openConversation,
     updateConversation,
@@ -72,10 +74,14 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
   useEffect(() => {
     void checkHealth();
     void loadConversations();
-  }, [checkHealth, loadConversations]);
+    // The catalog gates the settings sections and prices replies the gateway
+    // reported no cost for; it is cached server-side, so this is cheap.
+    void loadCatalog();
+  }, [checkHealth, loadConversations, loadCatalog]);
 
   const conversation = conversations.find((c) => c.id === currentId) ?? null;
   const thread = conversation ? activePath(messages, conversation.activeLeafId) : [];
+  const spend = conversation ? conversationSpend(messages, catalog) : null;
   const busy = generating || streaming !== null;
   const disabled = !conversation || configured === false || !isConnected;
 
@@ -104,7 +110,7 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
     if (conversation) await updateConversation(conversation.id, { title });
   };
 
-  const handleSettings = async (patch: { systemPrompt?: string | null; params?: ChatParams }) => {
+  const handleSettings = async (patch: { systemPrompt?: string | null; params?: ChatParamsPatch }) => {
     if (conversation) await updateConversation(conversation.id, patch);
   };
 
@@ -125,6 +131,19 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
             <>
               <EditableTitle value={conversation.title} onChange={(title) => void handleRename(title)} />
               <div className="flex-1" />
+              {spend && (
+                <span
+                  className="text-xs text-slate-500 whitespace-nowrap"
+                  title={
+                    spend.estimated
+                      ? 'Spend across every branch; includes estimates from catalog pricing'
+                      : 'Spend across every branch, as reported by the gateway'
+                  }
+                >
+                  {spend.estimated ? '~' : ''}
+                  {formatCost(spend.total)}
+                </span>
+              )}
               <button
                 onClick={() => setShowPicker(true)}
                 className={`${secondaryButton} whitespace-nowrap`}

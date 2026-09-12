@@ -1,19 +1,30 @@
 import { useEffect, useState } from 'react';
-import type { ChatParams, Conversation } from '@maestroai/shared';
+import type { ChatParamsPatch, Conversation } from '@maestroai/shared';
+import { useChatStore } from '../../stores/chatStore';
+import { RoutingSection } from './settings/RoutingSection';
+import { SamplingSection } from './settings/SamplingSection';
+import { ReasoningSection } from './settings/ReasoningSection';
+import { fieldClass } from './settings/fields';
 
 interface ChatSettingsProps {
   conversation: Conversation;
-  onChange: (patch: { systemPrompt?: string | null; params?: ChatParams }) => void;
+  /** `params` is a merge patch: the field that changed, `null` to clear it. */
+  onChange: (patch: { systemPrompt?: string | null; params?: ChatParamsPatch }) => void;
   onPickModel: () => void;
 }
 
-const field =
-  'w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500';
-
 export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettingsProps) {
+  const loadCatalog = useChatStore((state) => state.loadCatalog);
+  // The catalog record gates the OpenRouter sections; undefined until the
+  // catalog loads, or for a model id it does not list.
+  const model = useChatStore((state) => state.catalog.find((entry) => entry.id === conversation.model));
   const [systemPrompt, setSystemPrompt] = useState(conversation.systemPrompt ?? '');
   const [temperature, setTemperature] = useState(conversation.params.temperature ?? 0.7);
   const [maxTokens, setMaxTokens] = useState(conversation.params.maxTokens ?? 4096);
+
+  useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
 
   useEffect(() => {
     setSystemPrompt(conversation.systemPrompt ?? '');
@@ -35,6 +46,8 @@ export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettin
     setMaxTokens(value);
     if (value !== conversation.params.maxTokens) onChange({ params: { maxTokens: value } });
   };
+
+  const patchParams = (params: ChatParamsPatch) => onChange({ params });
 
   return (
     <aside className="w-80 shrink-0 bg-slate-900 border-l border-slate-800 flex flex-col overflow-y-auto">
@@ -75,13 +88,18 @@ export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettin
             onBlur={commitSystemPrompt}
             rows={6}
             placeholder="Optional instructions for the model"
-            className={`${field} resize-y`}
+            className={`${fieldClass} resize-y`}
           />
         </div>
 
         <div>
           <label className="flex justify-between text-xs text-slate-400 mb-1">
-            <span>Temperature</span>
+            <span>
+              Temperature
+              {model && !model.supportedParameters.includes('temperature') && (
+                <span className="text-slate-500"> — not used by this model</span>
+              )}
+            </span>
             <span className="text-slate-300">{temperature.toFixed(2)}</span>
           </label>
           <input
@@ -109,9 +127,13 @@ export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettin
             onKeyDown={(event) => {
               if (event.key === 'Enter') event.currentTarget.blur();
             }}
-            className={field}
+            className={fieldClass}
           />
         </div>
+
+        <RoutingSection conversation={conversation} model={model} onChange={patchParams} />
+        <SamplingSection conversation={conversation} model={model} onChange={patchParams} />
+        <ReasoningSection conversation={conversation} model={model} onChange={patchParams} />
 
         <p className="text-xs text-slate-500">Changes apply from the next message.</p>
       </div>

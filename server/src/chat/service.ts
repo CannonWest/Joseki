@@ -16,7 +16,7 @@ import { generateId, mergePatch } from '@maestroai/shared';
 import { Database } from '../db/database';
 import {
   DEFAULT_CHAT_MODEL,
-  applyReasoningDefault,
+  applyModelCapabilities,
   toWireMessages,
   type ChatRequest,
   type ChatResult,
@@ -152,7 +152,6 @@ export class ChatService {
     // a nested field (a routing preference, the reasoning effort) can be set
     // or cleared for one turn without restating the rest.
     const params: ChatParams = mergePatch(conversation.params, request.params ?? {});
-    const registry = params.tools === false ? NO_TOOLS : this.tools;
 
     // Store the user's message and make it the active leaf before calling out,
     // so the history is on disk whatever happens next.
@@ -197,10 +196,14 @@ export class ChatService {
     };
 
     try {
-      // A model that advertises a default reasoning effort gets it unless the
-      // conversation chose otherwise. Looked up here, with the turn already
-      // marked in flight, so a slow catalog cannot let a second send through.
-      const turnParams = applyReasoningDefault(params, await this.lookupModel(model));
+      // The model's catalog record shapes the turn: parameters it does not
+      // support are dropped, tools are withheld from a model without tool
+      // support, and a model advertising a default reasoning effort gets it
+      // unless the conversation chose otherwise. Looked up here, with the
+      // turn already marked in flight, so a slow catalog cannot let a second
+      // send through.
+      const turnParams = applyModelCapabilities(params, await this.lookupModel(model));
+      const registry = turnParams.tools === false ? NO_TOOLS : this.tools;
       const loop = runToolLoop(
         this.provider,
         registry,
@@ -331,6 +334,7 @@ function assistantMessage(
   };
   if (result) {
     message.tokenUsage = result.tokenUsage;
+    if (result.provider) message.provider = result.provider;
     if (result.cost !== undefined) message.cost = result.cost;
     if (result.finishReason) message.finishReason = result.finishReason;
     if (result.reasoning) message.reasoning = result.reasoning;

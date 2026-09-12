@@ -1,8 +1,20 @@
 import { memo } from 'react';
-import type { ChatMessage } from '@maestroai/shared';
-import type { StreamingReply } from '../../stores/chatStore';
+import type { ChatMessage, ChatModel } from '@maestroai/shared';
+import { useChatStore, type StreamingReply } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
-import { formatCost, formatLatency, formatTokens, shortModel } from './format';
+import { estimateCost, formatCost, formatLatency, formatTokens, shortModel } from './format';
+
+/**
+ * The catalog record behind a reply's resolved model — only for a reply the
+ * gateway gave no cost for, so its meta line can carry an estimate.
+ */
+export function useReplyModel(message: ChatMessage): ChatModel | undefined {
+  return useChatStore((state) =>
+    message.role === 'assistant' && message.cost === undefined && message.model
+      ? state.catalog.find((model) => model.id === message.model)
+      : undefined
+  );
+}
 
 export function Reasoning({ text, live = false }: { text: string; live?: boolean }) {
   return (
@@ -21,18 +33,27 @@ export function Meta({ items }: { items: Array<string | null | undefined> }) {
   return <div className="mt-2 text-xs text-slate-500">{shown.join(' · ')}</div>;
 }
 
-/** The meta line of an assistant message: model · tokens · cost · latency · stopped */
-export function assistantMeta(message: ChatMessage): Array<string | null | undefined> {
+/**
+ * The meta line of an assistant message: model · tokens · cost · latency ·
+ * stopped. When the gateway reported no cost, `model` (the catalog record)
+ * prices the usage instead, marked as an estimate; a stopped reply has no
+ * usage, so it shows no figure at all.
+ */
+export function assistantMeta(message: ChatMessage, model?: ChatModel): Array<string | null | undefined> {
+  const estimate = message.cost === undefined ? estimateCost(message.tokenUsage, model) : undefined;
+  const cost = estimate === undefined ? formatCost(message.cost) : `~${formatCost(estimate)} est.`;
   return [
     message.model ? shortModel(message.model) : null,
-    formatTokens(message.tokenUsage?.total),
-    formatCost(message.cost),
+    message.provider ? `via ${message.provider}` : null,
+    formatTokens(message.tokenUsage?.total, message.tokenUsage?.reasoningTokens),
+    cost,
     formatLatency(message.latencyMs),
     message.finishReason === 'cancelled' ? 'stopped' : null
   ];
 }
 
 export const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
+  const model = useReplyModel(message);
   switch (message.role) {
     case 'user':
       return (
@@ -71,7 +92,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
               !failed && <span className="text-sm text-slate-500 italic">Empty reply</span>
             )}
             {failed && <div className="mt-2 text-sm text-red-300">{message.error}</div>}
-            <Meta items={assistantMeta(message)} />
+            <Meta items={assistantMeta(message, model)} />
           </div>
         </div>
       );

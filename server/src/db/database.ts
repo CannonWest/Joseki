@@ -111,6 +111,7 @@ export class Database {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)`);
     // Columns added after the table first shipped
     this.ensureColumn('messages', 'reasoning_details', 'TEXT');
+    this.ensureColumn('messages', 'provider', 'TEXT');
 
     // Model configs table
     this.db.exec(`
@@ -431,9 +432,9 @@ export class Database {
   createMessage(message: ChatMessage): void {
     const stmt = this.db.prepare(`
       INSERT INTO messages
-      (id, conversation_id, parent_id, role, content, model, token_usage, cost, latency_ms,
+      (id, conversation_id, parent_id, role, content, model, provider, token_usage, cost, latency_ms,
        finish_reason, reasoning, reasoning_details, tool_calls, tool_call_id, error, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       message.id,
@@ -442,6 +443,7 @@ export class Database {
       message.role,
       message.content,
       message.model ?? null,
+      message.provider ?? null,
       message.tokenUsage ? JSON.stringify(message.tokenUsage) : null,
       message.cost ?? null,
       message.latencyMs ?? null,
@@ -495,6 +497,7 @@ export class Database {
       createdAt: row.created_at
     };
     if (row.model != null) message.model = row.model;
+    if (row.provider != null) message.provider = row.provider;
     if (row.token_usage != null) message.tokenUsage = JSON.parse(row.token_usage);
     if (row.cost != null) message.cost = row.cost;
     if (row.latency_ms != null) message.latencyMs = row.latency_ms;

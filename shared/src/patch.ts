@@ -3,6 +3,18 @@
 // and `reasoning` are objects that would otherwise be replaced whole.
 
 /**
+ * A JSON Merge Patch for `T`: every field optional, `null` clears a field,
+ * nested objects patch recursively, arrays and scalars replace whole.
+ */
+export type MergePatch<T> = {
+  [K in keyof T]?: NonNullable<T[K]> extends readonly unknown[]
+    ? NonNullable<T[K]> | null
+    : NonNullable<T[K]> extends object
+      ? MergePatch<NonNullable<T[K]>> | null
+      : NonNullable<T[K]> | null;
+};
+
+/**
  * Apply a JSON Merge Patch: objects merge key by key, recursively; `null`
  * removes the key it sits under; arrays and scalars replace whatever was there.
  * `undefined` in a patch means "no change" (JSON cannot carry it, but callers

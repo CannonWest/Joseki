@@ -1,7 +1,57 @@
+import type { ChatMessage, ChatModel, ChatTokenUsage } from '@maestroai/shared';
+
 /** `openai/gpt-4o-mini` → `gpt-4o-mini` */
 export function shortModel(id: string): string {
   const slash = id.indexOf('/');
   return slash >= 0 ? id.slice(slash + 1) : id;
+}
+
+/**
+ * What a reply cost by the catalog's per-million prices — for a reply the
+ * gateway reported no cost for. The gateway's completion count already
+ * includes reasoning tokens. Undefined without usage or without a price;
+ * a stopped reply has no usage at all, so it never gets an invented figure.
+ */
+export function estimateCost(
+  usage: ChatTokenUsage | undefined,
+  model: ChatModel | undefined
+): number | undefined {
+  if (!usage || !model || usage.total <= 0) return undefined;
+  const { prompt, completion } = model.pricing;
+  if (prompt === null || completion === null) return undefined;
+  return (usage.prompt * prompt + usage.completion * completion) / 1_000_000;
+}
+
+/**
+ * What the whole conversation cost — every branch, since every branch was
+ * paid for: reported costs, plus catalog estimates for replies without one.
+ * `estimated` says an estimate went in. Null while nothing is priceable.
+ */
+export function conversationSpend(
+  messages: ChatMessage[],
+  catalog: ChatModel[]
+): { total: number; estimated: boolean } | null {
+  let total = 0;
+  let estimated = false;
+  let priced = false;
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    if (message.cost !== undefined) {
+      total += message.cost;
+      priced = true;
+      continue;
+    }
+    const estimate = estimateCost(
+      message.tokenUsage,
+      catalog.find((model) => model.id === message.model)
+    );
+    if (estimate !== undefined) {
+      total += estimate;
+      estimated = true;
+      priced = true;
+    }
+  }
+  return priced ? { total, estimated } : null;
 }
 
 export function formatCost(usd: number | undefined): string | null {
@@ -12,11 +62,13 @@ export function formatCost(usd: number | undefined): string | null {
   return `$${short.includes('e') ? usd.toFixed(8) : short}`;
 }
 
-export function formatTokens(total: number | undefined): string | null {
+export function formatTokens(total: number | undefined, thinking?: number): string | null {
   // A stopped reply never receives its usage; 0 would misreport it as free.
   if (!total) return null;
   const count = total >= 10000 ? `${(total / 1000).toFixed(1)}k` : String(total);
-  return `${count} tokens`;
+  // Reasoning tokens are part of the total; naming them shows the thinking
+  // that the trace-less models (OpenAI's) never otherwise reveal.
+  return thinking ? `${count} tokens (${thinking} thinking)` : `${count} tokens`;
 }
 
 export function formatLatency(ms: number | undefined): string | null {

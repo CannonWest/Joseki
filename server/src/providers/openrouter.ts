@@ -10,6 +10,7 @@ import type {
   ModelReasoning,
   OpenRouterReasoning,
   OpenRouterRouting,
+  OpenRouterSampling,
   ReasoningEffort
 } from '@maestroai/shared';
 import { accumulateToolCallDeltas, finalizeToolCallDeltas } from './toolCalls';
@@ -80,6 +81,8 @@ export interface ChatRequest {
 export interface ChatResult {
   content: string;
   model: string;
+  /** The provider the gateway routed to, when it says. */
+  provider?: string;
   tokenUsage: ChatTokenUsage;
   /** Dollar cost reported by the gateway, when it reports one. */
   cost?: number;
@@ -262,6 +265,7 @@ export class OpenRouterProvider {
       cost,
       finishReason: choice?.finish_reason ?? undefined
     };
+    if (typeof response?.provider === 'string' && response.provider) result.provider = response.provider;
     // OpenRouter reports the trace on `reasoning`; `reasoning_content` is the
     // DeepSeek/Kimi spelling some upstreams pass through.
     const reasoning = message.reasoning ?? message.reasoning_content;
@@ -291,6 +295,7 @@ export class OpenRouterProvider {
     let reasoning = '';
     const reasoningDetails: unknown[] = [];
     let model = request.model;
+    let provider: string | undefined;
     let finishReason: string | undefined;
     let usage: unknown;
     const toolCalls = new Map<number, ChatToolCall>();
@@ -301,6 +306,7 @@ export class OpenRouterProvider {
       });
       for await (const chunk of stream) {
         if (typeof chunk?.model === 'string' && chunk.model) model = chunk.model;
+        if (typeof chunk?.provider === 'string' && chunk.provider) provider = chunk.provider;
         if (chunk?.usage) usage = chunk.usage;
 
         const choice = chunk?.choices?.[0];
@@ -330,6 +336,7 @@ export class OpenRouterProvider {
 
     const { tokenUsage, cost } = extractUsage(usage);
     const result: ChatResult = { content, model, tokenUsage, cost, finishReason };
+    if (provider) result.provider = provider;
     if (reasoning) result.reasoning = reasoning;
     if (reasoningDetails.length) result.reasoningDetails = reasoningDetails;
     if (toolCalls.size) result.toolCalls = finalizeToolCallDeltas(toolCalls);
@@ -468,6 +475,54 @@ export function applyReasoningDefault(params: ChatParams, model: ChatModel | und
   const effort = model?.reasoning?.defaultEffort;
   if (!effort || hasReasoningSetting(params.reasoning)) return params;
   return { ...params, reasoning: { ...(params.reasoning ?? {}), effort } };
+}
+
+/** ChatParams fields → the names the catalog lists under `supported_parameters` (any one counts). */
+const PARAM_WIRE_NAMES: Array<[keyof ChatParams, string[]]> = [
+  ['temperature', ['temperature']],
+  ['maxTokens', ['max_tokens', 'max_completion_tokens']],
+  ['topP', ['top_p']],
+  ['frequencyPenalty', ['frequency_penalty']],
+  ['presencePenalty', ['presence_penalty']],
+  ['stop', ['stop']],
+  ['reasoning', ['reasoning']]
+];
+
+const SAMPLING_WIRE_NAMES: Array<[keyof OpenRouterSampling, string]> = [
+  ['topK', 'top_k'],
+  ['minP', 'min_p'],
+  ['topA', 'top_a'],
+  ['repetitionPenalty', 'repetition_penalty'],
+  ['seed', 'seed']
+];
+
+/**
+ * The turn's params shaped to the model's catalog record. Parameters the
+ * model does not list under `supported_parameters` are dropped — the gateway
+ * would drop them anyway, and with `require_parameters` forced (tools on) an
+ * unsupported one leaves no endpoint to route to: a 404 for every
+ * conversation that sends the default `temperature` to a GPT-5-family model.
+ * Tools are withheld from a model without tool support, and the default
+ * reasoning effort is applied (`applyReasoningDefault`). An unknown model —
+ * not in the catalog — is left alone.
+ */
+export function applyModelCapabilities(params: ChatParams, model: ChatModel | undefined): ChatParams {
+  if (!model) return params;
+  const supported = new Set(model.supportedParameters);
+  const shaped: ChatParams = { ...params };
+  for (const [key, names] of PARAM_WIRE_NAMES) {
+    if (shaped[key] !== undefined && !names.some((name) => supported.has(name))) delete shaped[key];
+  }
+  if (shaped.sampling) {
+    const sampling: OpenRouterSampling = { ...shaped.sampling };
+    for (const [key, name] of SAMPLING_WIRE_NAMES) {
+      if (sampling[key] !== undefined && !supported.has(name)) delete sampling[key];
+    }
+    if (Object.keys(sampling).length) shaped.sampling = sampling;
+    else delete shaped.sampling;
+  }
+  if (shaped.tools !== false && !supported.has('tools')) shaped.tools = false;
+  return applyReasoningDefault(shaped, model);
 }
 
 function hasReasoningSetting(reasoning: OpenRouterReasoning | undefined): boolean {

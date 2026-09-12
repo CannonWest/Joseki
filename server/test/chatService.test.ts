@@ -606,3 +606,23 @@ test('send still runs when the model lookup fails', async () => {
   assert.equal(final.error, undefined);
   assert.equal(provider.requests[0].params?.reasoning, undefined);
 });
+
+test('send shapes the turn to the model: unsupported params dropped, tools withheld', async () => {
+  const db = new Database(':memory:');
+  const noTemperature: ChatModel = {
+    ...thinkingModel,
+    id: 'test/no-temperature',
+    supportedParameters: ['max_tokens', 'seed'],
+    reasoning: undefined
+  };
+  const provider = new CatalogProvider(reply(['ok']), [noTemperature]);
+  const service = new ChatService(db, provider, { defaultModel: 'test/no-temperature', tools: toolRegistry() });
+  const conversation = service.createConversation({ params: { temperature: 0.2, sampling: { seed: 3, topK: 9 } } });
+
+  await service.send({ conversationId: conversation.id, content: 'go' });
+  const request = provider.requests[0];
+  assert.deepEqual(request.params, { maxTokens: 4096, sampling: { seed: 3 }, tools: false });
+  assert.ok(!request.tools?.length, 'no tools offered to a model without tool support');
+  // The conversation keeps what the user set; only the turn was shaped.
+  assert.deepEqual(db.getConversation(conversation.id)?.params.temperature, 0.2);
+});

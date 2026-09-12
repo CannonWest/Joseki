@@ -6,13 +6,15 @@ import type {
   ChatMessageEvent,
   ChatModel,
   ChatParams,
+  ChatParamsPatch,
   ChatReasoningEvent,
   ChatStartEvent,
   ChatTokenEvent,
   ChatToolEndEvent,
   ChatToolStartEvent,
   Conversation,
-  ConversationDetail
+  ConversationDetail,
+  ModelEndpoints
 } from '@maestroai/shared';
 
 export const DEFAULT_CONVERSATION_TITLE = 'New conversation';
@@ -42,7 +44,8 @@ export interface ConversationPatch {
   title?: string;
   model?: string;
   systemPrompt?: string | null;
-  params?: ChatParams;
+  /** A merge patch: send the one field that changed, `null` to clear it. */
+  params?: ChatParamsPatch;
   activeLeafId?: string | null;
 }
 
@@ -54,6 +57,7 @@ export interface CreateConversationInput {
 }
 
 type CatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
+type RosterStatus = 'loading' | 'ready' | 'error';
 
 interface ChatState {
   /** Whether the server has an OpenRouter key; null until /health answers. */
@@ -70,6 +74,9 @@ interface ChatState {
   toolActivity: ToolActivity[];
   catalog: ChatModel[];
   catalogStatus: CatalogStatus;
+  /** Provider rosters by model id, from `/api/models/:author/:slug/endpoints`. */
+  rosters: Record<string, ModelEndpoints>;
+  rosterStatus: Record<string, RosterStatus>;
   error: string | null;
 
   checkHealth: () => Promise<void>;
@@ -80,6 +87,7 @@ interface ChatState {
   updateConversation: (id: string, patch: ConversationPatch) => Promise<Conversation | undefined>;
   deleteConversation: (id: string) => Promise<boolean>;
   loadCatalog: (force?: boolean) => Promise<void>;
+  loadRoster: (modelId: string, force?: boolean) => Promise<void>;
   clearError: () => void;
 
   // Socket events for the open conversation
@@ -117,6 +125,13 @@ function jsonBody(method: string, body: unknown): RequestInit {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+/** `author/slug` → the two path segments of the endpoints route, each encoded. */
+function rosterPath(modelId: string): string {
+  const slash = modelId.indexOf('/');
+  if (slash < 0) return encodeURIComponent(modelId);
+  return `${encodeURIComponent(modelId.slice(0, slash))}/${encodeURIComponent(modelId.slice(slash + 1))}`;
 }
 
 function byRecentActivity(a: Conversation, b: Conversation): number {
@@ -158,6 +173,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toolActivity: [],
   catalog: [],
   catalogStatus: 'idle',
+  rosters: {},
+  rosterStatus: {},
   error: null,
 
   checkHealth: async () => {
@@ -257,6 +274,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ catalog: models, catalogStatus: 'ready' });
     } catch (error) {
       set({ catalogStatus: 'error', error: errorMessage(error, 'Failed to load the model catalog') });
+    }
+  },
+
+  // A roster failure stays in the section that asked for it (a model the
+  // gateway does not know has none) — it never raises the chat banner.
+  loadRoster: async (modelId, force = false) => {
+    const status = get().rosterStatus[modelId];
+    if (status === 'loading' || (status === 'ready' && !force)) return;
+    set((state) => ({ rosterStatus: { ...state.rosterStatus, [modelId]: 'loading' } }));
+    try {
+      const roster = await request<ModelEndpoints>(
+        `/api/models/${rosterPath(modelId)}/endpoints${force ? '?refresh=1' : ''}`,
+        'Failed to load the provider roster'
+      );
+      set((state) => ({
+        rosters: { ...state.rosters, [modelId]: roster },
+        rosterStatus: { ...state.rosterStatus, [modelId]: 'ready' }
+      }));
+    } catch {
+      set((state) => ({ rosterStatus: { ...state.rosterStatus, [modelId]: 'error' } }));
     }
   },
 

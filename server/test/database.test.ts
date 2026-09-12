@@ -92,6 +92,7 @@ test('message metadata survives the round-trip and unset fields stay absent', ()
   const full: ChatMessage = {
     ...message('a1', 'c1', null, 'assistant', 'hi', 1),
     model: 'openai/gpt-4o-mini',
+    provider: 'Azure',
     tokenUsage: { prompt: 3, completion: 2, total: 5, cachedTokens: 1 },
     cost: 0.0001,
     latencyMs: 250,

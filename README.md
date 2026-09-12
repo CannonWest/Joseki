@@ -86,7 +86,7 @@ maestroai/
 
 The server holds multi-turn conversations against any model on [OpenRouter](https://openrouter.ai), streaming replies over socket.io and storing every message in SQLite. Set `OPENROUTER_API_KEY` to enable it; without a key the workflow editor works as before and the chat routes answer `503`.
 
-The client's **Chat** view (the Chat card on the welcome screen, or the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and per-reply usage and cost, a searchable model picker over the catalog, and per-conversation settings (model, system prompt, temperature, max tokens).
+The client's **Chat** view (the Chat card on the welcome screen, or the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and a per-reply line of model, the provider that served it, tokens (thinking tokens named), cost and latency, a searchable model picker over the catalog, and per-conversation settings — model, system prompt, temperature, max tokens, plus **Routing** (the model's provider roster with an order / only / skip pick per provider, and the gateway's routing preferences), **Sampling** and **Reasoning** sections that show only the controls the chosen model supports. A reply the gateway reported no cost for shows an estimate from catalog pricing, marked `~`; the header carries the conversation's spend across every branch.
 
 Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model.
 

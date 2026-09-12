@@ -1,5 +1,6 @@
 // Shared types and utilities for MaestroAI
 
+import type { MergePatch } from './patch';
 export { createExampleWorkflow } from './exampleWorkflow';
 export * from './validate';
 export * from './chat';
@@ -227,6 +228,9 @@ export interface ChatParams {
   reasoning?: OpenRouterReasoning;
 }
 
+/** What a PATCH (or a per-turn override) may send for `params`: a merge patch — set a nested field alone, or clear one with `null`. */
+export type ChatParamsPatch = MergePatch<ChatParams>;
+
 export interface Conversation {
   id: string;
   title: string;
@@ -273,6 +277,8 @@ export interface ChatMessage {
   createdAt: number;
   /** Model that produced an assistant message, as the gateway resolved it. */
   model?: string;
+  /** The provider that served it, as the gateway reports it (e.g. "Azure"). */
+  provider?: string;
   tokenUsage?: ChatTokenUsage;
   /** USD, as reported by the gateway. */
   cost?: number;

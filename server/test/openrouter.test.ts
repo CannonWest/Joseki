@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
 import {
   OpenRouterProvider,
+  applyModelCapabilities,
   applyReasoningDefault,
   buildChatCompletionBody,
   extractUsage,
@@ -346,6 +347,40 @@ test('chat reads a non-streaming response', async () => {
   });
 });
 
+test('chat and chatStream carry the provider the gateway routed to', async () => {
+  const plain = new OpenRouterProvider({
+    apiKey: 'test',
+    client: fakeClient([
+      {
+        model: 'openai/gpt-4o-mini',
+        provider: 'Azure',
+        choices: [{ message: { role: 'assistant', content: 'Hello' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 4, completion_tokens: 1 }
+      }
+    ]).client
+  });
+  const result = await plain.chat({ model: 'm', messages: [] });
+  assert.equal(result.provider, 'Azure');
+
+  const streamed = new OpenRouterProvider({
+    apiKey: 'test',
+    client: fakeClient([
+      { model: 'openai/gpt-4o-mini', provider: 'OpenAI', choices: [{ delta: { content: 'Hel' } }] },
+      { provider: 'OpenAI', choices: [{ delta: { content: 'lo' }, finish_reason: 'stop' }] },
+      { provider: '', choices: [], usage: { prompt_tokens: 4, completion_tokens: 1 } }
+    ]).client
+  });
+  const events = await collect(streamed.chatStream({ model: 'm', messages: [] }));
+  const done = events.find((event) => event.type === 'done');
+  assert.equal(done?.type === 'done' ? done.result.provider : undefined, 'OpenAI');
+
+  const silent = new OpenRouterProvider({
+    apiKey: 'test',
+    client: fakeClient([{ choices: [{ message: { role: 'assistant', content: 'Hi' } }] }]).client
+  });
+  assert.equal('provider' in (await silent.chat({ model: 'm', messages: [] })), false);
+});
+
 // ---- catalog ----
 
 function catalogFetch(record: (url: URL, init?: RequestInit) => void) {
@@ -678,6 +713,41 @@ test('applyReasoningDefault fills the model default effort only when the convers
   assert.equal(applyReasoningDefault(base, undefined), base);
   assert.equal(applyReasoningDefault(base, normalizeModelRecord({ id: 'x/y' })), base);
   assert.equal(applyReasoningDefault(base, normalizeModelRecord({ id: 'x/y', reasoning: { mandatory: true } })), base);
+});
+
+test('applyModelCapabilities drops unsupported params, withholds tools and keeps the reasoning default', () => {
+  // gpt-5.4-nano as the catalog lists it: no temperature / top_p / penalties,
+  // max_tokens under both names, seed but no other sampling knob.
+  const nano = normalizeModelRecord({
+    id: 'openai/gpt-5.4-nano',
+    supported_parameters: ['max_completion_tokens', 'max_tokens', 'reasoning', 'seed', 'tools', 'tool_choice'],
+    reasoning: { mandatory: false, default_enabled: false, supported_efforts: ['high', 'medium'], default_effort: 'medium' }
+  });
+  assert.deepEqual(
+    applyModelCapabilities(
+      {
+        temperature: 0.7,
+        maxTokens: 4096,
+        topP: 0.9,
+        frequencyPenalty: 0.1,
+        stop: ['END'],
+        sampling: { topK: 40, seed: 7 },
+        routing: { zdr: true }
+      },
+      nano
+    ),
+    { maxTokens: 4096, sampling: { seed: 7 }, routing: { zdr: true }, reasoning: { effort: 'medium' } }
+  );
+
+  const plain = normalizeModelRecord({ id: 'x/chat', supported_parameters: ['temperature', 'max_tokens'] });
+  assert.deepEqual(applyModelCapabilities({ temperature: 0.2, reasoning: { effort: 'high' }, sampling: { topK: 5 } }, plain), {
+    temperature: 0.2,
+    tools: false
+  });
+  assert.deepEqual(applyModelCapabilities({ temperature: 0.2, tools: false }, plain), { temperature: 0.2, tools: false });
+
+  const unknown = { temperature: 0.2, sampling: { topK: 1 } };
+  assert.equal(applyModelCapabilities(unknown, undefined), unknown);
 });
 
 test('findModel looks a model up in the cached catalog', async () => {
