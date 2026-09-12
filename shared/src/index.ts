@@ -104,6 +104,8 @@ export interface PromptConfig {
   sampling?: OpenRouterSampling;
   /** Reasoning controls, for a model that thinks. */
   reasoning?: OpenRouterReasoning;
+  /** Trade price against speed; unset takes the standard tier. */
+  serviceTier?: ServiceTier;
   onError?: ErrorHandlerConfig;
 }
 
@@ -122,6 +124,7 @@ export function promptParams(config: PromptConfig): ChatParams {
   if (config.topP !== undefined) params.topP = config.topP;
   if (config.frequencyPenalty !== undefined) params.frequencyPenalty = config.frequencyPenalty;
   if (config.presencePenalty !== undefined) params.presencePenalty = config.presencePenalty;
+  if (config.serviceTier) params.serviceTier = config.serviceTier;
   if (config.routing) params.routing = config.routing;
   if (config.sampling) params.sampling = config.sampling;
   if (config.reasoning) params.reasoning = config.reasoning;
@@ -333,6 +336,17 @@ export interface OpenRouterRouting {
   fallbackModels?: string[];
 }
 
+/**
+ * Which class of endpoint serves a request.
+ *
+ * `flex` buys a discount — around half, and the gateway will not fall back to
+ * a standard endpoint, so a request can be refused outright when flex
+ * capacity is short. `priority` buys speed at a premium. Saying nothing gets
+ * the standard tier. The `:floor` and `:nitro` model suffixes are the same
+ * thing said another way; this is the form that leaves the model id alone.
+ */
+export type ServiceTier = 'flex' | 'priority';
+
 /** Sampling controls OpenRouter accepts beyond the OpenAI parameter set. */
 export interface OpenRouterSampling {
   topK?: number;
@@ -371,6 +385,8 @@ export interface ChatParams {
   stop?: string[];
   /** Let the model call tools (run_workflow and the builtins). On unless false. */
   tools?: boolean;
+  /** Trade price against speed. Unset takes the standard tier. */
+  serviceTier?: ServiceTier;
   routing?: OpenRouterRouting;
   sampling?: OpenRouterSampling;
   reasoning?: OpenRouterReasoning;

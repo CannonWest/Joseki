@@ -156,7 +156,12 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
       case 'prompt':
         return (
           <div className="space-y-4">
-            <ModelSelect value={chosenModel} onChange={(id) => setConfig({ ...config, model: id })} />
+            <ModelSelect
+              value={chosenModel}
+              onChange={(id) => setConfig({ ...config, model: id })}
+              tier={config.serviceTier}
+              onTierChange={(serviceTier) => setConfig({ ...config, serviceTier })}
+            />
 
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">

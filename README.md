@@ -83,6 +83,17 @@ joseki/
 | `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
 | `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
 
+### Models this app does not offer
+
+OpenRouter publishes a `:batch` variant of many models — around half price, served only through its asynchronous Batch API (`POST /api/beta/batches`, results inside a 24-hour window). A chat completion to one is refused:
+
+```
+404 This model is only available through the Batch API.
+    Use the /api/beta/batches endpoint instead.
+```
+
+Joseki only makes chat completions, so `/api/models` leaves them out rather than offering a choice that could not have worked — 77 of 445 at the time of writing, every one of them with a plain sibling in the catalog. The provider's own catalog keeps them, so a workflow stored against one is still recognised. For a discount that *does* work here, set **Speed / price** to `flex`.
+
 ## When a node fails
 
 A prompt node can say what should happen when the model refuses, times out or errors — **On Error** in its config panel:
@@ -131,7 +142,7 @@ Messages form a tree: each message records its parent, so a conversation can bra
 | `/api/conversations/:id` | GET | The conversation with its whole message tree; `generating: true` while a reply is streaming |
 | `/api/conversations/:id` | PATCH | Update title / model / system prompt / params (a JSON Merge Patch — see below), or move `activeLeafId` |
 | `/api/conversations/:id` | DELETE | Delete the conversation and its messages |
-| `/api/models` | GET | The OpenRouter catalog (`?q=` searches it, `?refresh=1` bypasses the 5-minute cache); each model carries `supportedParameters` and, for thinking models, `reasoning` (`mandatory`, `defaultEnabled`, `supportedEfforts`, `defaultEffort`, `supportsMaxTokens`) |
+| `/api/models` | GET | The OpenRouter catalog (`?q=` searches it, `?refresh=1` bypasses the 5-minute cache); each model carries `supportedParameters` and, for thinking models, `reasoning` (`mandatory`, `defaultEnabled`, `supportedEfforts`, `defaultEffort`, `supportsMaxTokens`). **Batch-only models are left out** — see below |
 | `/api/models/:author/:slug/endpoints` | GET | A model's provider roster — provider slug, pricing, quantization, recent latency / throughput / uptime per endpoint — cached like the catalog (`?refresh=1` bypasses it); `404` for a model the gateway does not know |
 | `/health` | GET | Includes `chat: { configured, defaultModel }` |
 
@@ -139,6 +150,7 @@ Messages form a tree: each message records its parent, so a conversation can bra
 
 - `routing` becomes the request's `provider` object: `order` / `only` / `ignore` (provider slugs, as the endpoints route lists them), `allowFallbacks`, `requireParameters`, `dataCollection`, `zdr`, `quantizations`, `sort`, `maxPrice`, `preferredMinThroughput`, `preferredMaxLatency`; `fallbackModels` becomes the top-level `models` list. With tools on, `requireParameters` is forced on unless set, so the gateway never routes to a provider that would drop them.
 - `sampling` becomes top-level `top_k`, `min_p`, `top_a`, `repetition_penalty` and `seed`; the gateway ignores any the provider cannot honour.
+- `serviceTier` becomes `service_tier`, choosing which class of endpoint serves the turn: `flex` is around half price and slower, and is **refused outright rather than falling back** when flex capacity is short; `priority` is faster at a premium. Unset takes the standard tier. It is deliberately not gated on `supported_parameters` — no model lists it, because it selects an endpoint rather than asking the model for anything.
 - `reasoning` becomes the `reasoning` object: `effort` or `maxTokens` (a budget wins, is clamped to 1024–128000, and `max_tokens` is raised to leave room for it), `exclude`, `enabled`. A model whose catalog record advertises a `defaultEffort` reasons at it whenever the conversation sets nothing under `reasoning`; `{ "enabled": false }` turns that off.
 
 A PATCH applies `params` as a [JSON Merge Patch](https://www.rfc-editor.org/rfc/rfc7386): nested objects merge field by field and `null` clears a field, so `{ "params": { "routing": { "zdr": true } } }` sets one preference and leaves the rest, and `{ "params": { "reasoning": null } }` removes the reasoning settings. The per-turn `params` on `chat:send` merge over the conversation's the same way.

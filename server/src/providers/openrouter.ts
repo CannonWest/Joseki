@@ -360,6 +360,10 @@ export function buildChatCompletionBody(
   if (params.frequencyPenalty !== undefined) body.frequency_penalty = params.frequencyPenalty;
   if (params.presencePenalty !== undefined) body.presence_penalty = params.presencePenalty;
   if (params.stop?.length) body.stop = params.stop;
+  // Not in PARAM_WIRE_NAMES on purpose: no model lists `service_tier` under
+  // supported_parameters, because it selects a class of endpoint rather than
+  // asking the model for anything. Putting it there would drop it every time.
+  if (params.serviceTier) body.service_tier = params.serviceTier;
   if (request.tools?.length) body.tools = request.tools;
   if (request.toolChoice !== undefined) body.tool_choice = request.toolChoice;
   if (stream) body.stream = true;
@@ -699,6 +703,19 @@ export function normalizeEndpointRecord(raw: Record<string, any>): ModelEndpoint
 }
 
 /** Case-insensitive search over id, name and description; every term must match. */
+/**
+ * A model that can only be reached through the asynchronous Batch API
+ * (`POST /api/beta/batches`), never through a chat completion. The gateway
+ * marks them only by the `:batch` suffix on the id — there is no field for it
+ * — and answers a completion with `404 This model is only available through
+ * the Batch API`. Every one of them has a plain sibling in the catalog, so
+ * leaving them out of what this app offers costs nothing and spares a choice
+ * that could not have worked.
+ */
+export function isBatchOnly(model: Pick<ChatModel, 'id'>): boolean {
+  return model.id.endsWith(':batch');
+}
+
 export function filterModels(models: ChatModel[], query: string | undefined): ChatModel[] {
   const terms = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return models;

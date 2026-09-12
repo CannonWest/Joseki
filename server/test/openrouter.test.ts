@@ -8,6 +8,7 @@ import {
   buildChatCompletionBody,
   extractUsage,
   filterModels,
+  isBatchOnly,
   mergeReasoningDetails,
   normalizeModelRecord,
   normalizeReasoning,
@@ -844,4 +845,43 @@ test('getModelEndpoints normalizes the roster, encodes the id, caches per model 
   await assert.rejects(provider.getModelEndpoints('gpt-4o-mini'), badRequest);
   await assert.rejects(provider.getModelEndpoints('openai/'), badRequest);
   assert.equal(seen.length, 3);
+});
+
+// ============ Service tier, and the models a completion cannot reach ============
+
+test('a service tier rides the body as service_tier, and saying nothing sends nothing', () => {
+  const base = { model: 'openai/gpt-4o-mini', messages: [{ role: 'user' as const, content: 'hi' }] };
+
+  assert.equal(buildChatCompletionBody({ ...base, params: { serviceTier: 'flex' } }, false).service_tier, 'flex');
+  assert.equal(
+    buildChatCompletionBody({ ...base, params: { serviceTier: 'priority' } }, false).service_tier,
+    'priority'
+  );
+  assert.equal('service_tier' in buildChatCompletionBody({ ...base, params: {} }, false), false);
+});
+
+test('the tier survives shaping, because no model advertises it as a parameter', () => {
+  // applyModelCapabilities drops what a model does not list under
+  // supported_parameters. No model lists service_tier — it picks a class of
+  // endpoint rather than asking the model for anything — so it must not be
+  // treated as one of those parameters, or it would be dropped every time.
+  const model = {
+    id: 'openai/gpt-4o-mini',
+    name: 'OpenAI: GPT-4o-mini',
+    inputModalities: ['text'],
+    outputModalities: ['text'],
+    supportedParameters: ['max_tokens'],
+    pricing: { prompt: 0.15, completion: 0.6, request: null, image: null }
+  };
+  const shaped = applyModelCapabilities({ serviceTier: 'flex', temperature: 0.5 }, model as any);
+  assert.equal(shaped.serviceTier, 'flex', 'kept');
+  assert.equal(shaped.temperature, undefined, 'dropped, since the model does not list it');
+});
+
+test('a batch-only model is the one a completion cannot reach', () => {
+  assert.equal(isBatchOnly({ id: 'google/gemini-3.8-flash:batch' }), true);
+  assert.equal(isBatchOnly({ id: 'google/gemini-3.8-flash' }), false);
+  // No other suffix is batch-only, and a slug that merely starts the same is not one.
+  assert.equal(isBatchOnly({ id: 'meta-llama/llama-3.1-8b-instruct:free' }), false);
+  assert.equal(isBatchOnly({ id: 'anthropic/claude-haiku-4.5:batching' }), false);
 });

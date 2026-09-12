@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { OpenRouterProvider, ProviderError, filterModels } from '../providers/openrouter';
+import { OpenRouterProvider, ProviderError, filterModels, isBatchOnly } from '../providers/openrouter';
 
 const NOT_CONFIGURED = 'OpenRouter is not configured — set OPENROUTER_API_KEY';
 
@@ -16,7 +16,12 @@ export function modelRoutes(provider: OpenRouterProvider | null): Router {
     const refresh = wantsRefresh(req.query.refresh);
     const query = typeof req.query.q === 'string' ? req.query.q : undefined;
     try {
-      const models = await provider.listModels({}, { forceRefresh: refresh });
+      // Batch-only models are left out: this app only makes chat completions,
+      // which they refuse. The provider's own catalog keeps them, so a
+      // workflow stored against one is still recognised.
+      const models = (await provider.listModels({}, { forceRefresh: refresh })).filter(
+        (model) => !isBatchOnly(model)
+      );
       res.json({ models: filterModels(models, query), total: models.length });
     } catch (error) {
       res.status(502).json({ error: errorMessage(error) });

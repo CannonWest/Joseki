@@ -25,6 +25,11 @@ test('promptParams carries routing, sampling and reasoning through untouched', (
   assert.deepEqual(params.reasoning, reasoning);
 });
 
+test('the service tier a node picked is part of what it asks for', () => {
+  assert.equal(promptParams({ ...base, serviceTier: 'flex' }).serviceTier, 'flex');
+  assert.equal('serviceTier' in promptParams(base), false, 'unset means the standard tier');
+});
+
 test('promptParams never names a field the node left unset', () => {
   // A hand-built node with a bare config: nothing to send is an empty bag,
   // not a bag of undefineds — the gateway hears about a field or it does not.

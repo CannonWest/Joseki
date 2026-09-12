@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ChatModel } from '@joseki/shared';
+import type { ChatModel, ServiceTier } from '@joseki/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { formatContext, formatPerMillion } from './format';
 import { ModelPicker } from './ModelPicker';
@@ -45,9 +45,18 @@ function modelLabel(model: ChatModel): string {
 const selectClass =
   'w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500';
 
+/** What each tier buys, said where it is being chosen. */
+const TIER_NOTE: Record<ServiceTier, string> = {
+  flex: 'Around half price, slower. The gateway will not fall back to a standard endpoint, so a request is refused outright when flex capacity is short.',
+  priority: 'Priority endpoints are tried first, at a premium over standard.'
+};
+
 interface ModelSelectProps {
   value: string;
   onChange: (id: string) => void;
+  /** Omit the pair to leave the tier control out entirely. */
+  tier?: ServiceTier | undefined;
+  onTierChange?: (tier: ServiceTier | undefined) => void;
 }
 
 /**
@@ -57,7 +66,7 @@ interface ModelSelectProps {
  * one shop's dozen is faster than searching. Search is still here for the
  * times it is not, over the same catalog.
  */
-export function ModelSelect({ value, onChange }: ModelSelectProps) {
+export function ModelSelect({ value, onChange, tier, onTierChange }: ModelSelectProps) {
   const catalog = useChatStore((state) => state.catalog);
   const catalogStatus = useChatStore((state) => state.catalogStatus);
   const loadCatalog = useChatStore((state) => state.loadCatalog);
@@ -138,6 +147,23 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
           </select>
         </div>
       </div>
+
+      {onTierChange && (
+        <div className="w-[38%]">
+          <label className="block text-xs font-medium text-slate-400 mb-1">Speed / price</label>
+          <select
+            value={tier ?? ''}
+            onChange={(event) => onTierChange((event.target.value || undefined) as ServiceTier | undefined)}
+            className={selectClass}
+          >
+            <option value="">Standard</option>
+            <option value="flex">Cheaper · slower</option>
+            <option value="priority">Faster · pricier</option>
+          </select>
+        </div>
+      )}
+
+      {onTierChange && tier && <p className="text-xs text-slate-500">{TIER_NOTE[tier]}</p>}
 
       <p className="text-xs text-slate-500">
         {selected ? (
