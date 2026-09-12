@@ -173,7 +173,7 @@ The model can call tools during a turn. The loop runs up to 8 provider calls, ex
 | `calculate` | Evaluates an arithmetic expression |
 | `current_time` | The current time in UTC and, optionally, an IANA time zone |
 
-A tool never throws at the model: unknown tools, bad arguments and failures come back as error results it can act on. Results are capped at 120K characters in the loop and 16K characters in storage. Prompt nodes inside a workflow use the workflow engine's own OpenAI key (`OPENAI_API_KEY`), not OpenRouter.
+A tool never throws at the model: unknown tools, bad arguments and failures come back as error results it can act on. Results are capped at 120K characters in the loop and 16K characters in storage. Prompt nodes inside a workflow go through the same gateway and key as chat.
 
 Live smoke: `npm run smoke:tools --prefix server` (creates a small workflow, has the model run it, then cleans up).
 
@@ -195,8 +195,7 @@ The server and the client read **different files**, and neither reads a `.env` a
 
 | Variable | File | Description |
 |----------|------|-------------|
-| `OPENAI_API_KEY` | `server/.env` | OpenAI API key (workflow prompt nodes). A Run fails at adapter construction without it |
-| `OPENROUTER_API_KEY` | `server/.env` | OpenRouter API key (chat). Without it the chat routes answer `503` |
+| `OPENROUTER_API_KEY` | `server/.env` | OpenRouter API key — chat **and** workflow prompt nodes; it is the only model provider. Without it the chat routes answer `503` and a run fails before its first prompt node |
 | `OPENROUTER_DEFAULT_MODEL` | `server/.env` | Model for new conversations (default: `openai/gpt-4o-mini`) |
 | `DATABASE_PATH` | `server/.env` | SQLite database path. Relative paths resolve against `server/` (default: `./data/joseki.db`) |
 | `PORT` | `server/.env` | Server port (default: 3001) |

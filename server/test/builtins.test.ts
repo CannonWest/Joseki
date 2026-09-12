@@ -198,12 +198,12 @@ test('run_workflow reports an engine that cannot start', async () => {
     {
       ...context,
       createExecutor: () => {
-        throw new Error('The OPENAI_API_KEY environment variable is missing');
+        throw new Error('OpenRouter is not configured — set OPENROUTER_API_KEY');
       }
     }
   );
   assert.equal(result.errorType, 'engine_unavailable');
-  assert.match(result.content, /OPENAI_API_KEY/);
+  assert.match(result.content, /OPENROUTER_API_KEY/);
 });
 
 test('run_workflow refuses a workflow with a human gate instead of waiting', async () => {

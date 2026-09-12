@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LLMAdapter, OpenAIGenerator, OpenRouterGenerator, toChatRequest, toOpenAIParams } from '../src/adapters/llm';
+import { LLMAdapter, OpenRouterGenerator, toChatRequest } from '../src/adapters/llm';
 import type { ChatRequest, ChatResult, ChatStreamEvent } from '../src/providers/openrouter';
 
 const result = (over: Partial<ChatResult> = {}): ChatResult => ({
@@ -61,32 +61,6 @@ test('routing, sampling and reasoning ride the request whole, the same as a chat
   assert.deepEqual(request.params, settings);
 });
 
-test('the OpenAI fallback keeps what OpenAI accepts and drops the gateway extensions', () => {
-  assert.deepEqual(
-    toOpenAIParams({
-      temperature: 0.3,
-      maxTokens: 200,
-      topP: 0.9,
-      frequencyPenalty: 0.5,
-      presencePenalty: 0.1,
-      stop: ['END'],
-      routing: { only: ['groq'] },
-      sampling: { topK: 40 },
-      reasoning: { effort: 'high' }
-    }),
-    {
-      temperature: 0.3,
-      max_tokens: 200,
-      top_p: 0.9,
-      frequency_penalty: 0.5,
-      presence_penalty: 0.1,
-      stop: ['END']
-    }
-  );
-  assert.deepEqual(toOpenAIParams({}), {}, 'nothing set means nothing sent');
-  assert.deepEqual(toOpenAIParams({ stop: [] }), {}, 'an empty stop list is not a stop list');
-});
-
 test('a blank system prompt is left out rather than sent empty', () => {
   const request = toChatRequest({ ...params, systemPrompt: '   ' });
   assert.deepEqual(request.messages, [{ role: 'user', content: 'Summarize: rivers' }]);
@@ -121,8 +95,9 @@ test('a result without a cost leaves cost undefined instead of zero', async () =
   assert.equal('cost' in out, false);
 });
 
-test('fromEnv prefers OpenRouter, falls back to OpenAI, and refuses to start with neither', () => {
-  assert.ok(LLMAdapter.fromEnv({ OPENROUTER_API_KEY: 'or-key', OPENAI_API_KEY: 'oa-key' }) instanceof OpenRouterGenerator);
-  assert.ok(LLMAdapter.fromEnv({ OPENAI_API_KEY: 'oa-key' }) instanceof OpenAIGenerator);
-  assert.throws(() => LLMAdapter.fromEnv({}), /No model provider is configured/);
+test('fromEnv needs OpenRouter, and says so when the key is missing', () => {
+  assert.ok(LLMAdapter.fromEnv({ OPENROUTER_API_KEY: 'or-key' }) instanceof OpenRouterGenerator);
+  assert.throws(() => LLMAdapter.fromEnv({}), /set OPENROUTER_API_KEY/);
+  // An OpenAI key on its own used to be a provider. It is not one any more.
+  assert.throws(() => LLMAdapter.fromEnv({ OPENAI_API_KEY: 'oa-key' }), /set OPENROUTER_API_KEY/);
 });

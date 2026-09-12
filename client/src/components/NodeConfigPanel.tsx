@@ -56,9 +56,10 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   const [activeTab, setActiveTab] = useState<TabType>(hasResult ? 'result' : 'config');
 
   // Prompt nodes pick from the OpenRouter catalog the chat surface already
-  // loads, through the same picker. Any slug can still be typed: a deployment
-  // on OPENAI_API_KEY alone has no catalog to pick from.
+  // loads, through the same picker. OpenRouter is the only provider, so the
+  // catalog is the whole choice — there is no id worth typing that it lacks.
   const catalog = useChatStore((state) => state.catalog);
+  const catalogStatus = useChatStore((state) => state.catalogStatus);
   const loadCatalog = useChatStore((state) => state.loadCatalog);
   const [showPicker, setShowPicker] = useState(false);
   useEffect(() => {
@@ -166,24 +167,14 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
               <label className="block text-xs font-medium text-slate-400 mb-1">
                 Model
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chosenModel}
-                  onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                  placeholder={DEFAULT_WORKFLOW_MODEL}
-                  spellCheck={false}
-                  className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 font-mono"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPicker(true)}
-                  className="px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300 hover:border-blue-500 transition-colors whitespace-nowrap"
-                  title="Choose from the OpenRouter catalog"
-                >
-                  Choose…
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                className="w-full text-left px-3 py-2 bg-slate-800 border border-slate-700 rounded font-mono text-xs text-slate-200 hover:border-blue-500 transition-colors truncate"
+                title="Choose a model from the OpenRouter catalog"
+              >
+                {chosenModel}
+              </button>
               <p className="text-xs text-slate-500 mt-1">
                 {catalogModel ? (
                   <>
@@ -193,10 +184,10 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                   </>
                 ) : catalog.length ? (
                   <span className="text-amber-400/80">Not in the OpenRouter catalog — the gateway will refuse it</span>
+                ) : catalogStatus === 'error' ? (
+                  <span className="text-amber-400/80">Could not load the catalog — is OPENROUTER_API_KEY set?</span>
                 ) : (
-                  <>
-                    An OpenRouter model id, e.g. <code className="text-slate-400">{DEFAULT_WORKFLOW_MODEL}</code>
-                  </>
+                  <>Loading the catalog…</>
                 )}
               </p>
               {showPicker && (

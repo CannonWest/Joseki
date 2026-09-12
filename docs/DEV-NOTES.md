@@ -24,6 +24,12 @@ cd client && npx vite --force     # --force re-bundles; rm -rf node_modules/.vit
 despite reading like one.) A **type-only** addition — an interface, a type
 alias, a new field on an existing interface — needs none of this.
 
+Related: editing a component and its callers in one pass while that view is
+open in the browser produces a transient crash in the console — HMR swaps
+the modules one at a time, so for a moment a new callee runs against an old
+caller (or the reverse). It looks like a real TypeError with a real component
+stack. Reload before believing it; if it survives the reload, it is real.
+
 ## `tsx watch` does not reliably pick up edits
 
 The server dev script is `tsx watch src/index.ts`, and it misses edits. Worse,
