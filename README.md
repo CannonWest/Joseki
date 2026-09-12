@@ -202,6 +202,19 @@ The server and the client read **different files**, and neither reads a `.env` a
 | `CLIENT_URL` | `server/.env` | Frontend origin for CORS (default: `http://localhost:5173`) |
 | `VITE_WS_URL` | `client/.env` | Socket.io origin, if not the default `ws://localhost:3001` |
 
+## Schema changes
+
+A database carries its own version in SQLite's `user_version`, and opening it brings it forward — the server, `db:init` and the tests all migrate on connect, so no database is ever a schema behind the code that opens it. `npm run db:migrate` is that same step run on its own, and it says what it did:
+
+```
+Migrating database at: .../server/data/joseki.db
+  1. messages: the columns the table grew after it first shipped
+  2. execution_traces: index by run, in the order a run reads them
+Schema version 0 -> 2.
+```
+
+To change the schema, append a migration to `server/src/db/migrations.ts` — never edit a `CREATE TABLE` in `database.ts`, because an edit there reaches only databases that do not exist yet. Version 0 is that frozen baseline. Each migration and the version stamp recording it commit together, so a step that throws rolls back and the version still names the last step that finished; fix the step and run again and it picks up where it stopped.
+
 ## Architecture
 
 Joseki consists of three main components:

@@ -11,6 +11,7 @@ import type {
   ChatMessage
 } from '@joseki/shared';
 import { createExampleWorkflow, generateId } from '@joseki/shared';
+import { migrate, type MigrationResult } from './migrations';
 
 export type ConversationPatch = Partial<
   Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'params' | 'activeLeafId'>
@@ -18,6 +19,8 @@ export type ConversationPatch = Partial<
 
 export class Database {
   private db: DatabaseBetter.Database;
+  /** What opening this database brought it up to. `db:migrate` reports it. */
+  readonly schema: MigrationResult;
 
   constructor(path: string) {
     // better-sqlite3 will not create the parent directory, and server/data/ is
@@ -32,8 +35,16 @@ export class Database {
     }
     this.db = new DatabaseBetter(path);
     this.initTables();
+    // Every way in goes through here — the server, db:init, db:migrate and the
+    // tests — so no database is ever a schema behind the code that opens it.
+    this.schema = migrate(this.db);
   }
 
+  /**
+   * Schema version 0: what a database that does not exist yet is created with.
+   * Frozen — a change to an existing table goes in migrations.ts, because an
+   * edit here would never reach a database that already exists.
+   */
   private initTables() {
     // Workflows table
     this.db.exec(`
@@ -123,9 +134,6 @@ export class Database {
       CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at)
     `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)`);
-    // Columns added after the table first shipped
-    this.ensureColumn('messages', 'reasoning_details', 'TEXT');
-    this.ensureColumn('messages', 'provider', 'TEXT');
 
     // Model configs table
     this.db.exec(`
@@ -443,13 +451,6 @@ export class Database {
       pricing: JSON.parse(row.pricing),
       capabilities: JSON.parse(row.capabilities)
     }));
-  }
-
-  private ensureColumn(table: string, column: string, definition: string): void {
-    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (!columns.some((existing) => existing.name === column)) {
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    }
   }
 
   // Conversation operations
