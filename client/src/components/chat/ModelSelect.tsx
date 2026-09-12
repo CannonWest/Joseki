@@ -39,7 +39,7 @@ function authorLabel(models: ChatModel[], author: string): string {
 
 function modelLabel(model: ChatModel): string {
   const [, name] = splitCatalogName(model.name);
-  return `${name} · ${formatPerMillion(model.pricing.prompt)} / ${formatPerMillion(model.pricing.completion)}`;
+  return name;
 }
 
 const selectClass =
@@ -98,38 +98,45 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
 
   return (
     <div className="space-y-2">
-      <div>
-        <label className="block text-xs font-medium text-slate-400 mb-1">Author</label>
-        <select value={author} onChange={(event) => pickAuthor(event.target.value)} className={selectClass}>
-          {strandedAuthor && <option value={author}>{author || '—'} (not in the catalog)</option>}
-          {authors.map((key) => (
-            <option key={key} value={key}>
-              {authorLabel(groups.get(key)!, key)} ({groups.get(key)!.length})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <div className="flex items-baseline justify-between mb-1">
-          <label className="block text-xs font-medium text-slate-400">Model</label>
-          <button
-            type="button"
-            onClick={() => setSearching(true)}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-            title="Search the whole catalog by name, id or description"
+      <div className="flex gap-2">
+        <div className="w-[38%] shrink-0">
+          <label className="block text-xs font-medium text-slate-400 mb-1">Author</label>
+          <select
+            value={author}
+            onChange={(event) => pickAuthor(event.target.value)}
+            className={selectClass}
+            title={author}
           >
-            search{catalog.length ? ` all ${catalog.length}` : ''}…
-          </button>
+            {strandedAuthor && <option value={author}>{author || '—'} (not in the catalog)</option>}
+            {authors.map((key) => (
+              <option key={key} value={key}>
+                {authorLabel(groups.get(key)!, key)}
+              </option>
+            ))}
+          </select>
         </div>
-        <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}>
-          {strandedModel && <option value={value}>{slug} (not in the catalog)</option>}
-          {models.map((model) => (
-            <option key={model.id} value={model.id}>
-              {modelLabel(model)}
-            </option>
-          ))}
-        </select>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between mb-1 gap-2">
+            <label className="block text-xs font-medium text-slate-400">Model</label>
+            <button
+              type="button"
+              onClick={() => setSearching(true)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors whitespace-nowrap"
+              title="Search the whole catalog by name, id or description"
+            >
+              search{catalog.length ? ` all ${catalog.length}` : ''}…
+            </button>
+          </div>
+          <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClass}>
+            {strandedModel && <option value={value}>{slug} (not in the catalog)</option>}
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {modelLabel(model)}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <p className="text-xs text-slate-500">
