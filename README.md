@@ -36,7 +36,7 @@ The app will be available at:
 - Frontend: http://localhost:5173
 - Backend: http://localhost:3001
 
-After adding a **runtime** export to `shared`, restart the client dev server with its dependency cache cleared (`rm -rf client/node_modules/.vite`): Vite pre-bundles `@joseki/shared` once at startup, so the page otherwise loads the stale bundle and renders blank with `does not provide an export named …` — while `tsc` still passes against the rebuilt `shared/dist`. Type-only additions need no restart.
+After a **runtime** change to `shared`, rebuild it and restart the client with `npx vite --force`, or the page loads a stale pre-bundle and renders blank. Type-only additions need no restart. That, and the rest of what is worth knowing before changing something, is in [docs/DEV-NOTES.md](docs/DEV-NOTES.md).
 
 ## Project Structure
 
@@ -45,6 +45,7 @@ joseki/
 ├── client/          # React frontend (Vite + TypeScript + Tailwind)
 ├── server/          # Node.js backend (Express + Socket.io)
 ├── shared/          # Shared types and utilities
+├── docs/            # DEV-NOTES.md — the traps worth knowing about
 └── README.md        # This file
 ```
 
