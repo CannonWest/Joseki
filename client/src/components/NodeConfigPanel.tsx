@@ -160,9 +160,8 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
           <div className="space-y-4">
             <ModelSelect
               value={chosenModel}
-              onChange={(id) => setConfig({ ...config, model: id })}
               tier={config.serviceTier}
-              onTierChange={(serviceTier) => setConfig({ ...config, serviceTier })}
+              onChange={(model, serviceTier) => setConfig({ ...config, model, serviceTier })}
             />
 
             <div>

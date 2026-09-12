@@ -91,6 +91,14 @@ The two are not proportional. 29 of 445 models cap output below 5% of their wind
 
 Providers serving one model need not agree on either, and the figure on the model is only the top provider's: `meta-llama/llama-3.1-8b-instruct` advertises 131k, while `novita` serves 16k of it and `cloudflare` 32k. Pinning a provider under **Routing** can therefore shrink the window under you, so every row in the roster carries its own ceilings and the short ones are called out.
 
+### A model served at more than one speed
+
+A service tier is an **endpoint**, not a property of a model. OpenRouter lists `openai/flex` and `google-ai-studio/priority` in a model's provider roster beside the plain ones, at their own prices, and a model whose providers offer neither cannot be served at one — asking anyway is quietly ignored rather than refused. In a sample of 60 models across 58 authors, **52 had neither**; only openai, google, anthropic, x-ai and moonshotai offered any.
+
+So the speeds are not a control of their own. A prompt node's **Model** menu lists them beside the model itself — `GPT-6 Astra`, `GPT-6 Astra · cheaper, slower`, `GPT-6 Astra · faster, pricier` — derived from that roster, so a model with one speed simply has one entry and nothing offers a choice that would have done nothing. It is also how OpenRouter says it: `:floor` and `:nitro` are model suffixes. The prices shown are the chosen endpoint's own, not an estimate: `$10 / $50` standard against `$5.0 / $25` flex for the same model.
+
+Stored separately from the model id, as `serviceTier`, so the id stays one the catalog can resolve for context, output cap and pricing.
+
 ### Models this app does not offer
 
 OpenRouter publishes a `:batch` variant of many models — around half price, served only through its asynchronous Batch API (`POST /api/beta/batches`, results inside a 24-hour window). A chat completion to one is refused:
@@ -158,7 +166,7 @@ Messages form a tree: each message records its parent, so a conversation can bra
 
 - `routing` becomes the request's `provider` object: `order` / `only` / `ignore` (provider slugs, as the endpoints route lists them), `allowFallbacks`, `requireParameters`, `dataCollection`, `zdr`, `quantizations`, `sort`, `maxPrice`, `preferredMinThroughput`, `preferredMaxLatency`; `fallbackModels` becomes the top-level `models` list. With tools on, `requireParameters` is forced on unless set, so the gateway never routes to a provider that would drop them.
 - `sampling` becomes top-level `top_k`, `min_p`, `top_a`, `repetition_penalty` and `seed`; the gateway ignores any the provider cannot honour.
-- `serviceTier` becomes `service_tier`, choosing which class of endpoint serves the turn: `flex` is around half price and slower, and is **refused outright rather than falling back** when flex capacity is short; `priority` is faster at a premium. Unset takes the standard tier. It is deliberately not gated on `supported_parameters` — no model lists it, because it selects an endpoint rather than asking the model for anything.
+- `serviceTier` becomes `service_tier`, choosing which class of endpoint serves the turn: `flex` is cheaper and slower, and is **refused rather than falling back** to a standard endpoint; `priority` is faster at a premium. Unset takes the standard tier. It is deliberately not gated on `supported_parameters` — no model lists it, because it selects an endpoint rather than asking the model for anything. What gates it instead is the model's own provider roster; see below.
 - `reasoning` becomes the `reasoning` object: `effort` or `maxTokens` (a budget wins, is clamped to 1024–128000, and `max_tokens` is raised to leave room for it), `exclude`, `enabled`. A model whose catalog record advertises a `defaultEffort` reasons at it whenever the conversation sets nothing under `reasoning`; `{ "enabled": false }` turns that off.
 
 A PATCH applies `params` as a [JSON Merge Patch](https://www.rfc-editor.org/rfc/rfc7386): nested objects merge field by field and `null` clears a field, so `{ "params": { "routing": { "zdr": true } } }` sets one preference and leaves the rest, and `{ "params": { "reasoning": null } }` removes the reasoning settings. The per-turn `params` on `chat:send` merge over the conversation's the same way.
