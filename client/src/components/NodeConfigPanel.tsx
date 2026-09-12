@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_WORKFLOW_MODEL, MAX_ATTEMPTS } from '@joseki/shared';
-import type { OutputFormat } from '@joseki/shared';
+import type { ChatParamsPatch, OutputFormat } from '@joseki/shared';
 import { useChatStore } from '../stores/chatStore';
 import { useExecutionStore } from '../stores/executionStore';
 import { useWorkflowStore } from '../stores/workflowStore';
@@ -10,6 +10,10 @@ import { OutputResult } from './OutputResult';
 import { OUTPUT_FORMATS } from '../output/format';
 import { ModelPicker } from './chat/ModelPicker';
 import { formatContext, formatPerMillion } from './chat/format';
+import { RoutingSection } from './chat/settings/RoutingSection';
+import { SamplingSection } from './chat/settings/SamplingSection';
+import { ReasoningSection } from './chat/settings/ReasoningSection';
+import { patchPromptConfig, sectionParamsOf } from '../nodes/openrouter';
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -65,6 +69,11 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
     () => catalog.find((model) => model.id === chosenModel),
     [catalog, chosenModel]
   );
+  // The chat surface's Routing / Sampling / Reasoning sections, on the node.
+  // They read a params bag and speak in merge patches; the node shows them its
+  // config as one and applies each patch to itself.
+  const sectionParams = useMemo(() => sectionParamsOf(config), [config]);
+  const patchSections = (patch: ChatParamsPatch) => setConfig(patchPromptConfig(config, patch));
 
   const handleSave = () => {
     onUpdate({ label, config });
@@ -291,6 +300,15 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                 </p>
               </div>
             )}
+
+            <RoutingSection
+              params={sectionParams}
+              modelId={chosenModel}
+              model={catalogModel}
+              onChange={patchSections}
+            />
+            <SamplingSection params={sectionParams} model={catalogModel} onChange={patchSections} />
+            <ReasoningSection params={sectionParams} model={catalogModel} onChange={patchSections} />
 
             {/* Available Inputs Section */}
             {getAvailableInputs.length > 0 && (

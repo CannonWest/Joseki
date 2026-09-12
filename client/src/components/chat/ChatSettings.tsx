@@ -131,9 +131,9 @@ export function ChatSettings({ conversation, onChange, onPickModel }: ChatSettin
           />
         </div>
 
-        <RoutingSection conversation={conversation} model={model} onChange={patchParams} />
-        <SamplingSection conversation={conversation} model={model} onChange={patchParams} />
-        <ReasoningSection conversation={conversation} model={model} onChange={patchParams} />
+        <RoutingSection params={conversation.params} modelId={conversation.model} model={model} onChange={patchParams} />
+        <SamplingSection params={conversation.params} model={model} onChange={patchParams} />
+        <ReasoningSection params={conversation.params} model={model} onChange={patchParams} />
 
         <p className="text-xs text-slate-500">Changes apply from the next message.</p>
       </div>

@@ -57,6 +57,9 @@ JOSEKI_SERVER_URL=http://localhost:3011 npx vite --port 5183
   mount do not survive it — click, then read the page again, then click.
 - Reading the log panel's text out of the DOM is steadier than scrolling it:
   it auto-scrolls to the bottom on every new line.
+- A click on a canvas node sometimes only selects it and sometimes opens its
+  config panel. In a batch, probe for the `Node Configuration` heading
+  between clicks rather than assuming which one you got.
 
 ## Smoke scripts
 

@@ -1,4 +1,4 @@
-import type { ChatModel, ChatParamsPatch, Conversation, ReasoningEffort } from '@joseki/shared';
+import type { ChatModel, ChatParams, ChatParamsPatch, ReasoningEffort } from '@joseki/shared';
 import { SettingsSection } from './SettingsSection';
 import { NumberField, SelectField, Toggle, countSet } from './fields';
 
@@ -6,7 +6,8 @@ const ALL_EFFORTS: ReasoningEffort[] = ['max', 'xhigh', 'high', 'medium', 'low',
 const DEFAULT_BUDGET = 4096;
 
 interface ReasoningSectionProps {
-  conversation: Conversation;
+  /** The settings in view — a conversation's, or a prompt node's. */
+  params: ChatParams;
   model: ChatModel | undefined;
   onChange: (patch: ChatParamsPatch) => void;
 }
@@ -17,8 +18,8 @@ interface ReasoningSectionProps {
  * all. "Model default" sends nothing — the server fills in the advertised
  * effort per turn — so the hint derives that from the catalog record.
  */
-export function ReasoningSection({ conversation, model, onChange }: ReasoningSectionProps) {
-  const reasoning = conversation.params.reasoning ?? {};
+export function ReasoningSection({ params, model, onChange }: ReasoningSectionProps) {
+  const reasoning = params.reasoning ?? {};
   const capability = model?.reasoning;
   const count = countSet(reasoning);
   const reset = () => onChange({ reasoning: null });
@@ -75,7 +76,7 @@ export function ReasoningSection({ conversation, model, onChange }: ReasoningSec
             ? `On by default at ${defaultEffort}.`
             : undefined
       : mode === 'off'
-        ? 'Reasoning is off for this conversation.'
+        ? 'Reasoning is off.'
         : mode === 'budget'
           ? 'A budget beats an effort; max tokens grows to leave room for it.'
           : undefined;

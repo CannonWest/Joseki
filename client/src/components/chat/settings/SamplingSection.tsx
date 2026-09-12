@@ -1,4 +1,4 @@
-import type { ChatModel, ChatParamsPatch, Conversation, OpenRouterSampling } from '@joseki/shared';
+import type { ChatModel, ChatParams, ChatParamsPatch, OpenRouterSampling } from '@joseki/shared';
 import { SettingsSection } from './SettingsSection';
 import { NumberField, countSet } from './fields';
 
@@ -23,14 +23,15 @@ const CONTROLS: Control[] = [
 ];
 
 interface SamplingSectionProps {
-  conversation: Conversation;
+  /** The settings in view — a conversation's, or a prompt node's. */
+  params: ChatParams;
   model: ChatModel | undefined;
   onChange: (patch: ChatParamsPatch) => void;
 }
 
 /** The sampling knobs beyond the OpenAI set, each shown only when the model lists it. */
-export function SamplingSection({ conversation, model, onChange }: SamplingSectionProps) {
-  const sampling = conversation.params.sampling ?? {};
+export function SamplingSection({ params, model, onChange }: SamplingSectionProps) {
+  const sampling = params.sampling ?? {};
   // An unknown model (not in the catalog) cannot be gated — show everything.
   const supported = CONTROLS.filter((control) => !model || model.supportedParameters.includes(control.wire));
 

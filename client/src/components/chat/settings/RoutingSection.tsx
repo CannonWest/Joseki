@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type {
   ChatModel,
+  ChatParams,
   ChatParamsPatch,
-  Conversation,
   MergePatch,
   ModelEndpoint,
   OpenRouterRouting,
@@ -27,8 +27,13 @@ const LISTS: Array<{ name: ListName; label: string; tone: 'blue' | 'green' | 're
 type RoutingPatch = MergePatch<OpenRouterRouting>;
 
 interface RoutingSectionProps {
-  conversation: Conversation;
+  /** The settings in view — a conversation's, or a prompt node's. */
+  params: ChatParams;
+  /** The model they are for; its provider roster is what the section lists. */
+  modelId: string;
+  /** Its catalog record; undefined until the catalog loads, or for an id it does not list. */
   model: ChatModel | undefined;
+  /** Every write is a merge patch of the one thing that changed. */
   onChange: (patch: ChatParamsPatch) => void;
 }
 
@@ -46,9 +51,8 @@ function throughput(value: number | null): string {
  * is a merge patch of the one thing that changed; the lists are the exception
  * — a slug sits in at most one of them, so all three go together.
  */
-export function RoutingSection({ conversation, model, onChange }: RoutingSectionProps) {
-  const routing = conversation.params.routing ?? {};
-  const modelId = conversation.model;
+export function RoutingSection({ params, modelId, model, onChange }: RoutingSectionProps) {
+  const routing = params.routing ?? {};
   const roster = useChatStore((state) => state.rosters[modelId]);
   const rosterStatus = useChatStore((state) => state.rosterStatus[modelId]);
   const loadRoster = useChatStore((state) => state.loadRoster);
@@ -60,7 +64,7 @@ export function RoutingSection({ conversation, model, onChange }: RoutingSection
   }, [open, modelId, loadRoster]);
 
   const patch = (fields: RoutingPatch) => onChange({ routing: fields });
-  const toolsOn = conversation.params.tools !== false;
+  const toolsOn = params.tools !== false;
   const order = routing.order ?? [];
 
   const listOf = (slug: string): ListName | null =>
@@ -135,7 +139,7 @@ export function RoutingSection({ conversation, model, onChange }: RoutingSection
   };
 
   const renderEndpoint = (endpoint: ModelEndpoint) => (
-    <div key={endpoint.name} className="py-1.5 border-b border-slate-800/60 last:border-0">
+    <div key={endpoint.providerSlug} className="py-1.5 border-b border-slate-800/60 last:border-0">
       <div className="flex items-center gap-1">
         <span className="flex-1 min-w-0 truncate text-sm text-slate-200" title={endpoint.name}>
           {endpoint.providerSlug}
