@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LLMAdapter, OpenAIGenerator, OpenRouterGenerator, toChatRequest } from '../src/adapters/llm';
+import { LLMAdapter, OpenAIGenerator, OpenRouterGenerator, toChatRequest, toOpenAIParams } from '../src/adapters/llm';
 import type { ChatRequest, ChatResult, ChatStreamEvent } from '../src/providers/openrouter';
 
 const result = (over: Partial<ChatResult> = {}): ChatResult => ({
@@ -32,11 +32,10 @@ const params = {
   model: 'openai/gpt-4o-mini',
   systemPrompt: 'Be brief.',
   userPrompt: 'Summarize: rivers',
-  temperature: 0.3,
-  maxTokens: 200
+  params: { temperature: 0.3, maxTokens: 200 }
 };
 
-test('toChatRequest puts the system prompt first and maps the sampling params', () => {
+test('toChatRequest puts the system prompt first and passes the settings through', () => {
   assert.deepEqual(toChatRequest(params), {
     model: 'openai/gpt-4o-mini',
     messages: [
@@ -45,6 +44,47 @@ test('toChatRequest puts the system prompt first and maps the sampling params', 
     ],
     params: { temperature: 0.3, maxTokens: 200 }
   });
+});
+
+test('routing, sampling and reasoning ride the request whole, the same as a chat turn', () => {
+  const settings = {
+    temperature: 0.3,
+    maxTokens: 200,
+    topP: 0.9,
+    routing: { only: ['groq'], zdr: true, fallbackModels: ['openai/gpt-4o'] },
+    sampling: { topK: 40, seed: 7 },
+    reasoning: { effort: 'high' as const }
+  };
+  const request = toChatRequest({ ...params, params: settings });
+  // Not a copy with the extensions stripped — the very object, so the
+  // provider's shaping sees everything the node asked for.
+  assert.deepEqual(request.params, settings);
+});
+
+test('the OpenAI fallback keeps what OpenAI accepts and drops the gateway extensions', () => {
+  assert.deepEqual(
+    toOpenAIParams({
+      temperature: 0.3,
+      maxTokens: 200,
+      topP: 0.9,
+      frequencyPenalty: 0.5,
+      presencePenalty: 0.1,
+      stop: ['END'],
+      routing: { only: ['groq'] },
+      sampling: { topK: 40 },
+      reasoning: { effort: 'high' }
+    }),
+    {
+      temperature: 0.3,
+      max_tokens: 200,
+      top_p: 0.9,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.1,
+      stop: ['END']
+    }
+  );
+  assert.deepEqual(toOpenAIParams({}), {}, 'nothing set means nothing sent');
+  assert.deepEqual(toOpenAIParams({ stop: [] }), {}, 'an empty stop list is not a stop list');
 });
 
 test('a blank system prompt is left out rather than sent empty', () => {

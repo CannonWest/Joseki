@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExampleWorkflow, MAX_ATTEMPTS } from '@joseki/shared';
 import type {
+  ChatParams,
   Workflow,
   WorkflowNode,
   WorkflowEdge,
@@ -31,9 +32,9 @@ function workflow(id: string, nodes: WorkflowNode[], edges: WorkflowEdge[]): Wor
   return { id, name: id, nodes, edges, variables: {}, createdAt: 0, updatedAt: 0 };
 }
 
-interface Call { model: string; systemPrompt: string; userPrompt: string }
+interface Call { model: string; systemPrompt: string; userPrompt: string; params?: ChatParams }
 
-/** Echoes what it was asked, so a test can see the prompt a node really sent. */
+/** Echoes what it was asked, so a test can see the prompt — and the settings — a node really sent. */
 class StubLLM {
   calls: Call[] = [];
   failOn: string | null = null;
@@ -43,7 +44,7 @@ class StubLLM {
   /** Cost the fake gateway reports; undefined means it reported none. */
   cost: number | undefined = undefined;
   async generate(p: Call) {
-    this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt });
+    this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt, params: p.params });
     const refusing =
       this.failOn !== null &&
       p.userPrompt.includes(this.failOn) &&
@@ -132,6 +133,36 @@ test('a required input with no value fails the run at that node', async () => {
   await assert.rejects(h.run(), /Input "in" is required/);
   assert.deepEqual(h.started, ['in']);
   assert.equal(h.llm.calls.length, 0, 'nothing downstream should have run');
+});
+
+test('a prompt node sends its routing, sampling and reasoning along with its prompts', async () => {
+  const wf = linear();
+  const draft = wf.nodes.find((n) => n.id === 'draft')!;
+  Object.assign(draft.data.config, {
+    topP: 0.9,
+    routing: { only: ['groq'], fallbackModels: ['openai/gpt-4o'] },
+    sampling: { topK: 40 },
+    reasoning: { effort: 'high' }
+  });
+  const h = harness(wf, { inputs: { in: 'x' } });
+  await h.run();
+
+  const call = h.llm.calls.find((c) => c.userPrompt.startsWith('Summarize'))!;
+  assert.deepEqual(call.params, {
+    temperature: 0,
+    maxTokens: 10,
+    topP: 0.9,
+    routing: { only: ['groq'], fallbackModels: ['openai/gpt-4o'] },
+    sampling: { topK: 40 },
+    reasoning: { effort: 'high' }
+  });
+});
+
+test('a prompt node that set nothing beyond temperature and max tokens sends only those', async () => {
+  const h = harness(linear(), { inputs: { in: 'x' } });
+  await h.run();
+  const call = h.llm.calls.find((c) => c.userPrompt.startsWith('Summarize'))!;
+  assert.deepEqual(call.params, { temperature: 0, maxTokens: 10 });
 });
 
 test('prompt text is not HTML-escaped on its way to the model', async () => {

@@ -13,7 +13,8 @@ import {
   DEFAULT_GATE_TIMEOUT_SECONDS,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_MAX_REVISIONS,
-  MAX_ATTEMPTS
+  MAX_ATTEMPTS,
+  promptParams
 } from '@joseki/shared';
 import Handlebars from 'handlebars';
 import { Parser as ExprParser } from 'expr-eval';
@@ -541,8 +542,7 @@ export class WorkflowExecutor {
       model: config.model,
       systemPrompt,
       userPrompt,
-      temperature: config.temperature,
-      maxTokens: config.maxTokens,
+      params: promptParams(config),
       onToken: onStreamToken ? (token) => onStreamToken(node.id, token) : undefined
     });
 
@@ -694,8 +694,7 @@ export class WorkflowExecutor {
           model,
           systemPrompt: '',
           userPrompt: prompt,
-          temperature: config.temperature,
-          maxTokens: config.maxTokens
+          params: { temperature: config.temperature, maxTokens: config.maxTokens }
         });
         return { ...result, model };
       })

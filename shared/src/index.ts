@@ -98,7 +98,34 @@ export interface PromptConfig {
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  /** Provider routing — the same preferences a conversation sets. */
+  routing?: OpenRouterRouting;
+  /** The sampling controls beyond the OpenAI set. */
+  sampling?: OpenRouterSampling;
+  /** Reasoning controls, for a model that thinks. */
+  reasoning?: OpenRouterReasoning;
   onError?: ErrorHandlerConfig;
+}
+
+/**
+ * A prompt node's generation settings, in the shape a request takes.
+ *
+ * A node and a chat turn ask the gateway for the same things, so they say it
+ * the same way: whatever the chat surface learns to send, a node can carry
+ * too. Only what the node actually set is included — an absent field is one
+ * the gateway never hears about, rather than one sent as undefined.
+ */
+export function promptParams(config: PromptConfig): ChatParams {
+  const params: ChatParams = {};
+  if (config.temperature !== undefined) params.temperature = config.temperature;
+  if (config.maxTokens !== undefined) params.maxTokens = config.maxTokens;
+  if (config.topP !== undefined) params.topP = config.topP;
+  if (config.frequencyPenalty !== undefined) params.frequencyPenalty = config.frequencyPenalty;
+  if (config.presencePenalty !== undefined) params.presencePenalty = config.presencePenalty;
+  if (config.routing) params.routing = config.routing;
+  if (config.sampling) params.sampling = config.sampling;
+  if (config.reasoning) params.reasoning = config.reasoning;
+  return params;
 }
 
 export interface BranchConfig {

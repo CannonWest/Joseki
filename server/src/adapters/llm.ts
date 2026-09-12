@@ -1,12 +1,18 @@
 import OpenAI from 'openai';
+import type { ChatParams } from '@joseki/shared';
 import { OpenRouterProvider, type ChatRequest, type ChatResult, type WireMessage } from '../providers/openrouter';
 
 export interface GenerationParams {
   model: string;
   systemPrompt: string;
   userPrompt: string;
-  temperature: number;
-  maxTokens: number;
+  /**
+   * Generation settings in the shape a chat turn sends — temperature and
+   * max tokens, but also routing, sampling and reasoning. The provider shapes
+   * them to the model's catalog record, so a node asks for whatever it likes
+   * and the gateway hears only what the model accepts.
+   */
+  params: ChatParams;
   onToken?: (token: string) => void;
 }
 
@@ -76,11 +82,7 @@ export function toChatRequest(params: GenerationParams): ChatRequest {
   const messages: WireMessage[] = [];
   if (params.systemPrompt.trim()) messages.push({ role: 'system', content: params.systemPrompt });
   messages.push({ role: 'user', content: params.userPrompt });
-  return {
-    model: params.model,
-    messages,
-    params: { temperature: params.temperature, maxTokens: params.maxTokens }
-  };
+  return { model: params.model, messages, params: params.params };
 }
 
 function fromChatResult(result: ChatResult): GenerationResult {
@@ -97,12 +99,28 @@ function fromChatResult(result: ChatResult): GenerationResult {
   return out;
 }
 
+/**
+ * The subset OpenAI's own endpoint accepts. Routing, the extra sampling knobs
+ * and reasoning are the gateway's extensions and have no home here.
+ */
+export function toOpenAIParams(params: ChatParams): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (params.temperature !== undefined) out.temperature = params.temperature;
+  if (params.maxTokens !== undefined) out.max_tokens = params.maxTokens;
+  if (params.topP !== undefined) out.top_p = params.topP;
+  if (params.frequencyPenalty !== undefined) out.frequency_penalty = params.frequencyPenalty;
+  if (params.presencePenalty !== undefined) out.presence_penalty = params.presencePenalty;
+  if (params.stop?.length) out.stop = params.stop;
+  return out;
+}
+
 /** Prompt nodes straight to OpenAI, for a deployment without OpenRouter. */
 export class OpenAIGenerator implements Generator {
   constructor(private readonly openai: OpenAI) {}
 
   async generate(params: GenerationParams): Promise<GenerationResult> {
-    const { model, systemPrompt, userPrompt, temperature, maxTokens, onToken } = params;
+    const { model, systemPrompt, userPrompt, onToken } = params;
+    const settings = toOpenAIParams(params.params);
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -110,14 +128,13 @@ export class OpenAIGenerator implements Generator {
     ];
 
     if (onToken) {
-      return this.generateStreaming(model, messages, temperature, maxTokens, onToken);
+      return this.generateStreaming(model, messages, settings, onToken);
     }
 
     const response = await this.openai.chat.completions.create({
       model,
       messages,
-      temperature,
-      max_tokens: maxTokens
+      ...settings
     });
 
     const content = response.choices[0]?.message?.content || '';
@@ -137,15 +154,13 @@ export class OpenAIGenerator implements Generator {
   private async generateStreaming(
     model: string,
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
-    temperature: number,
-    maxTokens: number,
+    settings: Record<string, unknown>,
     onToken: (token: string) => void
   ): Promise<GenerationResult> {
     const stream = await this.openai.chat.completions.create({
       model,
       messages,
-      temperature,
-      max_tokens: maxTokens,
+      ...settings,
       stream: true
     });
 
