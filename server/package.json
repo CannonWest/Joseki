@@ -10,7 +10,8 @@
     "test": "tsx --test \"test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.test.json",
     "smoke:chat": "tsx scripts/chat-smoke.ts",
-    "smoke:tools": "tsx scripts/tools-smoke.ts"
+    "smoke:tools": "tsx scripts/tools-smoke.ts",
+    "probe:reasoning": "tsx scripts/reasoning-probe.ts"
   },
   "dependencies": {
     "@maestroai/shared": "file:../shared",

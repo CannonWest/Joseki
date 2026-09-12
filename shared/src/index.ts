@@ -3,6 +3,7 @@
 export { createExampleWorkflow } from './exampleWorkflow';
 export * from './validate';
 export * from './chat';
+export * from './patch';
 
 // ==================== Workflow Types ====================
 
@@ -159,6 +160,9 @@ export interface ExecutionContext {
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
+/** Quantization levels a provider endpoint may report, as OpenRouter names them. */
+export type Quantization = 'int4' | 'int8' | 'fp4' | 'fp6' | 'fp8' | 'fp16' | 'bf16' | 'fp32' | 'unknown';
+
 /** OpenRouter provider-routing preferences (the request's `provider` object). */
 export interface OpenRouterRouting {
   order?: string[];
@@ -168,10 +172,14 @@ export interface OpenRouterRouting {
   requireParameters?: boolean;
   dataCollection?: 'allow' | 'deny';
   zdr?: boolean;
-  quantizations?: string[];
+  quantizations?: Quantization[];
   sort?: 'price' | 'throughput' | 'latency';
   /** USD per million tokens (per request / per image for those fields). */
   maxPrice?: { prompt?: number; completion?: number; request?: number; image?: number };
+  /** Tokens per second (p50) below which an endpoint is deprioritized — not excluded. */
+  preferredMinThroughput?: number;
+  /** Seconds (p50) above which an endpoint is deprioritized — not excluded. */
+  preferredMaxLatency?: number;
   /** Fallback model slugs, tried in order when the primary model fails. */
   fallbackModels?: string[];
 }
@@ -185,9 +193,13 @@ export interface OpenRouterSampling {
   seed?: number;
 }
 
-/** Reasoning-token controls for thinking models. `effort` and `maxTokens` are exclusive. */
+/** Reasoning effort levels; a model advertises the subset it accepts in `ModelReasoning.supportedEfforts`. */
+export type ReasoningEffort = 'max' | 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+
+/** Reasoning-token controls for thinking models. `effort` and `maxTokens` are exclusive; a budget wins. */
 export interface OpenRouterReasoning {
-  effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+  effort?: ReasoningEffort;
+  /** Token budget for thinking; the gateway clamps it to 1024–128000. */
   maxTokens?: number;
   /** Think, but leave the trace out of the response. */
   exclude?: boolean;
@@ -195,10 +207,11 @@ export interface OpenRouterReasoning {
 }
 
 /**
- * Generation settings for a chat turn. The OpenAI-compatible sampling
- * parameters are sent today; `routing`, `sampling` and `reasoning` are the
- * OpenRouter extensions — typed here so the UI and storage agree on their
- * shape, forwarded to the gateway in a later milestone.
+ * Generation settings for a chat turn: the OpenAI-compatible sampling
+ * parameters plus OpenRouter's extensions — `routing` becomes the request's
+ * `provider` object (and `models` for fallbacks), `sampling` its top-level
+ * sampling keys, `reasoning` its `reasoning` object. A PATCH merges params as
+ * a JSON Merge Patch, so a nested field can be set or cleared on its own.
  */
 export interface ChatParams {
   temperature?: number;
@@ -302,8 +315,59 @@ export interface ChatModel {
     request: number | null;
     image: number | null;
   };
-  /** Per-model reasoning capability, as the catalog reports it. */
-  reasoning?: Record<string, unknown>;
+  /** Per-model reasoning capability; absent for models that cannot reason. */
+  reasoning?: ModelReasoning;
+}
+
+/** What the catalog says about a model's reasoning — the gating data for reasoning controls. */
+export interface ModelReasoning {
+  /** The model always reasons; it cannot be turned off. */
+  mandatory?: boolean;
+  /** Whether the gateway reasons when a request sets nothing under `reasoning`. */
+  defaultEnabled?: boolean;
+  supportedEfforts?: ReasoningEffort[];
+  /** The effort used when reasoning is on and no effort was given. */
+  defaultEffort?: ReasoningEffort;
+  /** The model takes a token budget (`reasoning.maxTokens`), not only an effort level. */
+  supportsMaxTokens?: boolean;
+}
+
+/** One provider endpoint serving a model, from OpenRouter's `/models/{author}/{slug}/endpoints`. */
+export interface ModelEndpoint {
+  /** Display name, e.g. "Azure". */
+  providerName: string;
+  /** The slug routing preferences (`order` / `only` / `ignore`) take, e.g. "azure". */
+  providerSlug: string;
+  /** The endpoint's own label, e.g. "Azure | openai/gpt-4o-mini". */
+  name: string;
+  contextLength?: number;
+  maxPromptTokens?: number;
+  maxCompletionTokens?: number;
+  /** USD per million tokens, like `ChatModel.pricing`. */
+  pricing: ChatModel['pricing'];
+  /** As the gateway reports it — one of `Quantization` today, kept open for new levels. */
+  quantization?: string;
+  supportedParameters: string[];
+  supportsImplicitCaching?: boolean;
+  /** Seconds, over the last 30 minutes; null when the gateway has no sample. */
+  latencyLast30m: number | null;
+  /** Tokens per second, over the last 30 minutes; null when the gateway has no sample. */
+  throughputLast30m: number | null;
+  /** Percent, over the last 5 minutes / 30 minutes / day; null when the gateway has no sample. */
+  uptimeLast5m: number | null;
+  uptimeLast30m: number | null;
+  uptimeLast1d: number | null;
+  /** The gateway's status code for the endpoint; 0 is healthy. */
+  status?: number;
+}
+
+/** A model's provider roster, cached server-side for a few minutes. */
+export interface ModelEndpoints {
+  id: string;
+  name: string;
+  endpoints: ModelEndpoint[];
+  /** Epoch ms of the fetch behind this response. */
+  fetchedAt: number;
 }
 
 // ==================== Chat Socket Protocol ====================

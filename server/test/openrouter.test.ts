@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
 import {
   OpenRouterProvider,
+  applyReasoningDefault,
   buildChatCompletionBody,
   extractUsage,
   filterModels,
   mergeReasoningDetails,
   normalizeModelRecord,
+  normalizeReasoning,
   toWireMessages,
   type ChatStreamEvent,
   type CompletionsClient
@@ -489,4 +491,287 @@ test('fromEnv returns null without a key', () => {
   assert.equal(OpenRouterProvider.fromEnv({}), null);
   assert.equal(OpenRouterProvider.fromEnv({ OPENROUTER_API_KEY: '  ' }), null);
   assert.ok(OpenRouterProvider.fromEnv({ OPENROUTER_API_KEY: 'sk-or-test' }) instanceof OpenRouterProvider);
+});
+
+test('buildChatCompletionBody forwards routing as the provider object and fallbacks as models', () => {
+  const body = buildChatCompletionBody(
+    {
+      model: 'anthropic/claude-sonnet-4.6',
+      messages: [{ role: 'user', content: 'hi' }],
+      params: {
+        routing: {
+          order: ['anthropic', ' google-vertex '],
+          only: [],
+          ignore: [''],
+          allowFallbacks: false,
+          dataCollection: 'deny',
+          zdr: true,
+          quantizations: ['fp8', 'bf16'],
+          sort: 'throughput',
+          maxPrice: { prompt: 3, completion: 15 },
+          preferredMinThroughput: 40,
+          preferredMaxLatency: 2.5,
+          fallbackModels: ['openai/gpt-4o-mini', '']
+        }
+      }
+    },
+    false
+  );
+  assert.deepEqual(body.provider, {
+    order: ['anthropic', 'google-vertex'],
+    allow_fallbacks: false,
+    data_collection: 'deny',
+    zdr: true,
+    quantizations: ['fp8', 'bf16'],
+    sort: 'throughput',
+    max_price: { prompt: 3, completion: 15 },
+    preferred_min_throughput: 40,
+    preferred_max_latency: 2.5
+  });
+  assert.deepEqual(body.models, ['openai/gpt-4o-mini']);
+  assert.equal('routing' in body, false);
+});
+
+test('buildChatCompletionBody takes comma-separated provider lists and sends nothing for empty extension objects', () => {
+  const listed = buildChatCompletionBody(
+    {
+      model: 'm',
+      messages: [],
+      params: { routing: { order: 'anthropic, google-vertex,' as unknown as string[] } }
+    },
+    false
+  );
+  assert.deepEqual(listed.provider, { order: ['anthropic', 'google-vertex'] });
+
+  const empty = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { routing: {}, sampling: {}, reasoning: {} } },
+    false
+  );
+  assert.equal('provider' in empty, false);
+  assert.equal('models' in empty, false);
+  assert.equal('reasoning' in empty, false);
+});
+
+test('buildChatCompletionBody forces require_parameters with tools unless routing set it', () => {
+  const tools = [{ type: 'function' as const, function: { name: 'echo', parameters: {} } }];
+  const forced = buildChatCompletionBody({ model: 'm', messages: [], tools }, false);
+  assert.deepEqual(forced.provider, { require_parameters: true });
+
+  const explicit = buildChatCompletionBody(
+    { model: 'm', messages: [], tools, params: { routing: { requireParameters: false } } },
+    false
+  );
+  assert.deepEqual(explicit.provider, { require_parameters: false });
+
+  const plain = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { routing: { zdr: true } } },
+    false
+  );
+  assert.deepEqual(plain.provider, { zdr: true });
+});
+
+test('buildChatCompletionBody forwards the sampling extensions as top-level keys', () => {
+  const body = buildChatCompletionBody(
+    {
+      model: 'm',
+      messages: [],
+      params: { sampling: { topK: 40, minP: 0.05, topA: 0.2, repetitionPenalty: 1.1, seed: 7 } }
+    },
+    false
+  );
+  assert.equal(body.top_k, 40);
+  assert.equal(body.min_p, 0.05);
+  assert.equal(body.top_a, 0.2);
+  assert.equal(body.repetition_penalty, 1.1);
+  assert.equal(body.seed, 7);
+  assert.equal('sampling' in body, false);
+
+  const unset = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { sampling: { topK: undefined, seed: Number.NaN } } },
+    false
+  );
+  assert.equal('top_k' in unset, false);
+  assert.equal('seed' in unset, false);
+});
+
+test('buildChatCompletionBody maps reasoning: a budget is clamped and beats effort, and max_tokens makes room for it', () => {
+  const effort = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { maxTokens: 4096, reasoning: { effort: 'high', exclude: true } } },
+    false
+  );
+  assert.deepEqual(effort.reasoning, { effort: 'high', exclude: true });
+  assert.equal(effort.max_tokens, 4096);
+
+  const budget = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { maxTokens: 4096, reasoning: { effort: 'high', maxTokens: 8000 } } },
+    false
+  );
+  assert.deepEqual(budget.reasoning, { max_tokens: 8000 });
+  assert.equal(budget.max_tokens, 4096 + 8000);
+
+  const fits = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { maxTokens: 4096, reasoning: { maxTokens: 2000 } } },
+    false
+  );
+  assert.deepEqual(fits.reasoning, { max_tokens: 2000 });
+  assert.equal(fits.max_tokens, 4096);
+
+  const floored = buildChatCompletionBody({ model: 'm', messages: [], params: { reasoning: { maxTokens: 500 } } }, false);
+  assert.deepEqual(floored.reasoning, { max_tokens: 1024 });
+  assert.equal('max_tokens' in floored, false);
+  const capped = buildChatCompletionBody({ model: 'm', messages: [], params: { reasoning: { maxTokens: 500_000 } } }, false);
+  assert.deepEqual(capped.reasoning, { max_tokens: 128_000 });
+
+  const off = buildChatCompletionBody({ model: 'm', messages: [], params: { reasoning: { enabled: false } } }, false);
+  assert.deepEqual(off.reasoning, { enabled: false });
+  const on = buildChatCompletionBody({ model: 'm', messages: [], params: { reasoning: { enabled: true } } }, false);
+  assert.deepEqual(on.reasoning, { enabled: true });
+
+  const junk = buildChatCompletionBody(
+    { model: 'm', messages: [], params: { reasoning: { effort: 'turbo' as any, maxTokens: -5, exclude: false } } },
+    false
+  );
+  assert.equal('reasoning' in junk, false);
+});
+
+test('normalizeReasoning reads the catalog reasoning object and keeps only known efforts', () => {
+  assert.equal(normalizeReasoning(undefined), undefined);
+  assert.equal(normalizeReasoning('yes'), undefined);
+  assert.deepEqual(normalizeReasoning({}), {});
+  assert.deepEqual(
+    normalizeReasoning({
+      mandatory: false,
+      default_enabled: false,
+      supported_efforts: ['max', 'xhigh', 'high', 'turbo', 7],
+      default_effort: 'high',
+      supports_max_tokens: true
+    }),
+    {
+      mandatory: false,
+      defaultEnabled: false,
+      supportedEfforts: ['max', 'xhigh', 'high'],
+      defaultEffort: 'high',
+      supportsMaxTokens: true
+    }
+  );
+  assert.deepEqual(normalizeReasoning({ mandatory: true, default_effort: 'turbo' }), { mandatory: true });
+  assert.deepEqual(normalizeModelRecord({ id: 'x/y', reasoning: { mandatory: true } }).reasoning, { mandatory: true });
+  assert.equal(normalizeModelRecord({ id: 'x/y' }).reasoning, undefined);
+});
+
+test('applyReasoningDefault fills the model default effort only when the conversation set nothing', () => {
+  const model = normalizeModelRecord({
+    id: 'anthropic/claude-opus-4.8',
+    reasoning: { mandatory: false, default_enabled: false, supported_efforts: ['high', 'medium'], default_effort: 'high' }
+  });
+  const base = { temperature: 0.7, maxTokens: 4096 };
+  assert.deepEqual(applyReasoningDefault(base, model), { ...base, reasoning: { effort: 'high' } });
+  assert.deepEqual(applyReasoningDefault({ ...base, reasoning: { exclude: true } }, model), {
+    ...base,
+    reasoning: { exclude: true, effort: 'high' }
+  });
+
+  for (const reasoning of [{ effort: 'low' as const }, { maxTokens: 2048 }, { enabled: false }, { enabled: true }]) {
+    const params = { ...base, reasoning };
+    assert.equal(applyReasoningDefault(params, model), params);
+  }
+  assert.equal(applyReasoningDefault(base, undefined), base);
+  assert.equal(applyReasoningDefault(base, normalizeModelRecord({ id: 'x/y' })), base);
+  assert.equal(applyReasoningDefault(base, normalizeModelRecord({ id: 'x/y', reasoning: { mandatory: true } })), base);
+});
+
+test('findModel looks a model up in the cached catalog', async () => {
+  const { fetchImpl, count } = catalogFetch(() => {});
+  const provider = new OpenRouterProvider({
+    apiKey: 'test',
+    fetchImpl,
+    catalogTtlMs: 60_000,
+    client: fakeClient([]).client
+  });
+  assert.equal((await provider.findModel('a/b'))?.name, 'B');
+  assert.equal(await provider.findModel('a/zzz'), undefined);
+  assert.equal(count(), 1);
+});
+
+test('getModelEndpoints normalizes the roster, encodes the id, caches per model and rejects a bare id', async () => {
+  const seen: URL[] = [];
+  const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
+    seen.push(new URL(String(input)));
+    return new Response(
+      JSON.stringify({
+        data: {
+          id: 'openai/gpt-4o-mini',
+          name: 'OpenAI: GPT-4o-mini',
+          endpoints: [
+            {
+              name: 'Azure | openai/gpt-4o-mini',
+              provider_name: 'Azure',
+              tag: 'azure',
+              context_length: 128000,
+              max_completion_tokens: 16384,
+              max_prompt_tokens: null,
+              pricing: { prompt: '0.00000015', completion: '0.0000006', input_cache_read: '0.000000075', discount: 0 },
+              quantization: 'unknown',
+              supported_parameters: ['temperature', 'tools'],
+              supports_implicit_caching: false,
+              status: 0,
+              uptime_last_30m: 99.8,
+              uptime_last_5m: 100,
+              uptime_last_1d: 99.6,
+              latency_last_30m: null,
+              throughput_last_30m: 71.2
+            },
+            { provider_name: 'OpenAI' },
+            'junk'
+          ]
+        }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }) as typeof fetch;
+  const provider = new OpenRouterProvider({
+    apiKey: 'test',
+    fetchImpl,
+    catalogTtlMs: 60_000,
+    client: fakeClient([]).client
+  });
+
+  const roster = await provider.getModelEndpoints('openai/gpt-4o-mini:free');
+  assert.equal(seen[0].pathname, '/api/v1/models/openai/gpt-4o-mini%3Afree/endpoints');
+  assert.equal(roster.id, 'openai/gpt-4o-mini');
+  assert.equal(roster.name, 'OpenAI: GPT-4o-mini');
+  assert.equal(roster.endpoints.length, 2);
+  assert.deepEqual(roster.endpoints[0], {
+    providerName: 'Azure',
+    providerSlug: 'azure',
+    name: 'Azure | openai/gpt-4o-mini',
+    contextLength: 128000,
+    maxPromptTokens: undefined,
+    maxCompletionTokens: 16384,
+    pricing: { prompt: 0.15, completion: 0.6, request: null, image: null },
+    quantization: 'unknown',
+    supportedParameters: ['temperature', 'tools'],
+    supportsImplicitCaching: false,
+    latencyLast30m: null,
+    throughputLast30m: 71.2,
+    uptimeLast5m: 100,
+    uptimeLast30m: 99.8,
+    uptimeLast1d: 99.6,
+    status: 0
+  });
+  assert.equal(roster.endpoints[1].providerSlug, 'OpenAI');
+  assert.equal(roster.endpoints[1].name, 'OpenAI');
+  assert.equal(roster.endpoints[1].pricing.prompt, null);
+
+  await provider.getModelEndpoints('openai/gpt-4o-mini:free');
+  assert.equal(seen.length, 1);
+  await provider.getModelEndpoints('openai/gpt-4o-mini:free', { forceRefresh: true });
+  assert.equal(seen.length, 2);
+  await provider.getModelEndpoints('openai/gpt-4o');
+  assert.equal(seen.length, 3);
+
+  const badRequest = (error: Error & { status?: number }) => error.name === 'ProviderError' && error.status === 400;
+  await assert.rejects(provider.getModelEndpoints('gpt-4o-mini'), badRequest);
+  await assert.rejects(provider.getModelEndpoints('openai/'), badRequest);
+  assert.equal(seen.length, 3);
 });

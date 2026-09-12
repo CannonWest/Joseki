@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { ChatParams } from '@maestroai/shared';
+import { mergePatch } from '@maestroai/shared';
 import { ChatService } from '../chat/service';
 import { Database, ConversationPatch } from '../db/database';
 
@@ -36,7 +37,9 @@ export function conversationRoutes(db: Database, chat: ChatService): Router {
     });
   });
 
-  // Update title / model / system prompt / params, or move the active leaf
+  // Update title / model / system prompt / params, or move the active leaf.
+  // `params` is applied as a JSON Merge Patch (RFC 7386): nested objects such
+  // as `routing` merge field by field, and `null` clears a field.
   router.patch('/:id', (req, res) => {
     const conversation = db.getConversation(req.params.id);
     if (!conversation) {
@@ -52,7 +55,7 @@ export function conversationRoutes(db: Database, chat: ChatService): Router {
         ? body.systemPrompt
         : null;
     }
-    if (isRecord(body.params)) patch.params = { ...conversation.params, ...body.params };
+    if (isRecord(body.params)) patch.params = mergePatch(conversation.params, body.params);
     if (body.activeLeafId === null) {
       patch.activeLeafId = null;
     } else if (typeof body.activeLeafId === 'string') {

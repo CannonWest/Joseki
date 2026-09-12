@@ -4,7 +4,13 @@ import type {
   ChatModel,
   ChatParams,
   ChatTokenUsage,
-  ChatToolCall
+  ChatToolCall,
+  ModelEndpoint,
+  ModelEndpoints,
+  ModelReasoning,
+  OpenRouterReasoning,
+  OpenRouterRouting,
+  ReasoningEffort
 } from '@maestroai/shared';
 import { accumulateToolCallDeltas, finalizeToolCallDeltas } from './toolCalls';
 
@@ -117,6 +123,7 @@ export class OpenRouterProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly catalogTtlMs: number;
   private readonly catalog = new Map<string, { fetchedAt: number; models: ChatModel[] }>();
+  private readonly endpoints = new Map<string, ModelEndpoints>();
 
   constructor(options: OpenRouterOptions) {
     if (!options.apiKey) {
@@ -171,6 +178,40 @@ export class OpenRouterProvider {
     const models = data.filter(isRecord).map(normalizeModelRecord);
     this.catalog.set(key, { fetchedAt: now, models });
     return models.slice();
+  }
+
+  /** The catalog record for one model id; undefined when the catalog does not list it. */
+  async findModel(modelId: string): Promise<ChatModel | undefined> {
+    const models = await this.listModels();
+    return models.find((model) => model.id === modelId);
+  }
+
+  /**
+   * A model's provider roster — who serves it, at what price and quantization,
+   * with recent latency, throughput and uptime. Cached per model for the
+   * catalog TTL.
+   */
+  async getModelEndpoints(
+    modelId: string,
+    options: { forceRefresh?: boolean } = {}
+  ): Promise<ModelEndpoints> {
+    const id = modelId.trim();
+    const slash = id.indexOf('/');
+    if (slash <= 0 || slash === id.length - 1) {
+      throw new ProviderError('OpenRouter model ids look like author/slug', 400);
+    }
+    const now = Date.now();
+    const cached = this.endpoints.get(id);
+    if (cached && !options.forceRefresh && now - cached.fetchedAt < this.catalogTtlMs) {
+      return cached;
+    }
+
+    const author = encodeURIComponent(id.slice(0, slash));
+    const slug = encodeURIComponent(id.slice(slash + 1));
+    const payload = await this.requestJson(`/models/${author}/${slug}/endpoints`, {});
+    const roster = normalizeEndpointsPayload(payload, id, now);
+    this.endpoints.set(id, roster);
+    return roster;
   }
 
   private async requestJson(path: string, query: Record<string, string>): Promise<any> {
@@ -316,10 +357,145 @@ export function buildChatCompletionBody(
   if (request.toolChoice !== undefined) body.tool_choice = request.toolChoice;
   if (stream) body.stream = true;
 
-  // OpenRouter's routing / sampling / reasoning extensions are typed on
-  // ChatParams but not forwarded yet — they ride the request body as
-  // `provider`, top-level sampling keys and `reasoning` respectively.
+  // OpenRouter's extensions ride the same body: routing preferences as the
+  // `provider` object (and `models` for fallbacks), the extra sampling knobs
+  // as top-level keys, `reasoning` as its own object. Empty strings and empty
+  // lists mean "unset" — a settings form clears a field by sending one.
+  const provider = buildProviderPreferences(params.routing, Boolean(request.tools?.length));
+  if (provider) body.provider = provider;
+  const fallbacks = cleanStringList(params.routing?.fallbackModels);
+  if (fallbacks) body.models = fallbacks;
+
+  const sampling = params.sampling ?? {};
+  if (isNumber(sampling.topK)) body.top_k = sampling.topK;
+  if (isNumber(sampling.minP)) body.min_p = sampling.minP;
+  if (isNumber(sampling.topA)) body.top_a = sampling.topA;
+  if (isNumber(sampling.repetitionPenalty)) body.repetition_penalty = sampling.repetitionPenalty;
+  if (isNumber(sampling.seed)) body.seed = sampling.seed;
+
+  const reasoning = buildReasoning(params.reasoning);
+  if (reasoning) {
+    body.reasoning = reasoning;
+    // A thinking budget must stay strictly below max_tokens, or the gateway
+    // rejects the request for leaving no room to answer. The stored
+    // max_tokens is the answer allowance; the budget goes on top of it, so
+    // the two settings never fight. Without a max_tokens, the gateway's own
+    // default applies and is left alone.
+    const budget = reasoning.max_tokens;
+    if (isNumber(budget) && isNumber(body.max_tokens) && budget >= body.max_tokens) {
+      body.max_tokens = body.max_tokens + budget;
+    }
+  }
   return body;
+}
+
+const REASONING_BUDGET_MIN = 1024;
+const REASONING_BUDGET_MAX = 128_000;
+const REASONING_EFFORTS: ReadonlySet<string> = new Set<ReasoningEffort>([
+  'max',
+  'xhigh',
+  'high',
+  'medium',
+  'low',
+  'minimal',
+  'none'
+]);
+
+/** `params.routing` → the request's `provider` object; undefined when nothing is set. */
+function buildProviderPreferences(
+  routing: OpenRouterRouting | undefined,
+  withTools: boolean
+): Record<string, unknown> | undefined {
+  const source = routing ?? {};
+  const prefs: Record<string, unknown> = {};
+  const order = cleanStringList(source.order);
+  if (order) prefs.order = order;
+  const only = cleanStringList(source.only);
+  if (only) prefs.only = only;
+  const ignore = cleanStringList(source.ignore);
+  if (ignore) prefs.ignore = ignore;
+  if (typeof source.allowFallbacks === 'boolean') prefs.allow_fallbacks = source.allowFallbacks;
+  if (typeof source.requireParameters === 'boolean') prefs.require_parameters = source.requireParameters;
+  if (source.dataCollection === 'allow' || source.dataCollection === 'deny') {
+    prefs.data_collection = source.dataCollection;
+  }
+  if (typeof source.zdr === 'boolean') prefs.zdr = source.zdr;
+  const quantizations = cleanStringList(source.quantizations);
+  if (quantizations) prefs.quantizations = quantizations;
+  if (source.sort === 'price' || source.sort === 'throughput' || source.sort === 'latency') {
+    prefs.sort = source.sort;
+  }
+  const maxPrice = cleanMaxPrice(source.maxPrice);
+  if (maxPrice) prefs.max_price = maxPrice;
+  if (isNumber(source.preferredMinThroughput)) prefs.preferred_min_throughput = source.preferredMinThroughput;
+  if (isNumber(source.preferredMaxLatency)) prefs.preferred_max_latency = source.preferredMaxLatency;
+
+  // A provider that ignores parameters it does not support would drop the
+  // tools and break the loop; with tools on, route only to those honouring
+  // every parameter sent — unless the setting was made explicitly.
+  if (withTools && prefs.require_parameters === undefined) prefs.require_parameters = true;
+  return Object.keys(prefs).length ? prefs : undefined;
+}
+
+/** `params.reasoning` → the request's `reasoning` object; undefined when nothing is set. */
+function buildReasoning(
+  reasoning: OpenRouterReasoning | undefined
+): Record<string, unknown> | undefined {
+  if (!reasoning) return undefined;
+  const out: Record<string, unknown> = {};
+  const budget = isNumber(reasoning.maxTokens) && reasoning.maxTokens > 0 ? reasoning.maxTokens : 0;
+  if (budget) {
+    // The gateway floors a budget at 1024 and caps it at 128k; clamping here
+    // keeps the wire value equal to what will be used. A budget wins over an
+    // effort — the two are exclusive.
+    out.max_tokens = Math.min(Math.max(Math.round(budget), REASONING_BUDGET_MIN), REASONING_BUDGET_MAX);
+  } else if (isReasoningEffort(reasoning.effort)) {
+    out.effort = reasoning.effort;
+  }
+  if (typeof reasoning.enabled === 'boolean') out.enabled = reasoning.enabled;
+  if (reasoning.exclude === true) out.exclude = true;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The conversation's reasoning setting with the model's advertised default
+ * filled in when the conversation set nothing: a model whose catalog record
+ * carries `defaultEffort` reasons at that effort out of the box — for one
+ * with `defaultEnabled: false`, this is what turns it on. An explicit setting
+ * (on, off, an effort, a budget) is left alone; so is an unknown model.
+ */
+export function applyReasoningDefault(params: ChatParams, model: ChatModel | undefined): ChatParams {
+  const effort = model?.reasoning?.defaultEffort;
+  if (!effort || hasReasoningSetting(params.reasoning)) return params;
+  return { ...params, reasoning: { ...(params.reasoning ?? {}), effort } };
+}
+
+function hasReasoningSetting(reasoning: OpenRouterReasoning | undefined): boolean {
+  if (!reasoning) return false;
+  return (
+    isReasoningEffort(reasoning.effort) ||
+    (isNumber(reasoning.maxTokens) && reasoning.maxTokens > 0) ||
+    typeof reasoning.enabled === 'boolean'
+  );
+}
+
+/** Trimmed, non-empty strings — from a list or a comma-separated string — or undefined when nothing is left. */
+function cleanStringList(value: unknown): string[] | undefined {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  const items = raw
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
+}
+
+function cleanMaxPrice(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, number> = {};
+  for (const key of ['prompt', 'completion', 'request', 'image'] as const) {
+    if (isNumber(value[key])) out[key] = value[key];
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**
@@ -400,8 +576,71 @@ export function normalizeModelRecord(raw: Record<string, any>): ChatModel {
       request: numberOrNull(pricing.request),
       image: numberOrNull(pricing.image)
     },
-    reasoning: isRecord(raw.reasoning) ? raw.reasoning : undefined
+    reasoning: normalizeReasoning(raw.reasoning)
   };
+}
+
+/** The catalog's per-model `reasoning` object → `ModelReasoning`; undefined when the model cannot reason. */
+export function normalizeReasoning(raw: unknown): ModelReasoning | undefined {
+  if (!isRecord(raw)) return undefined;
+  const reasoning: ModelReasoning = {};
+  if (typeof raw.mandatory === 'boolean') reasoning.mandatory = raw.mandatory;
+  if (typeof raw.default_enabled === 'boolean') reasoning.defaultEnabled = raw.default_enabled;
+  const efforts = stringArray(raw.supported_efforts).filter(isReasoningEffort);
+  if (efforts.length) reasoning.supportedEfforts = efforts;
+  if (isReasoningEffort(raw.default_effort)) reasoning.defaultEffort = raw.default_effort;
+  if (typeof raw.supports_max_tokens === 'boolean') reasoning.supportsMaxTokens = raw.supports_max_tokens;
+  return reasoning;
+}
+
+/** OpenRouter's `/models/{author}/{slug}/endpoints` payload → a model's roster. */
+export function normalizeEndpointsPayload(
+  payload: unknown,
+  modelId: string,
+  fetchedAt: number
+): ModelEndpoints {
+  const outer = isRecord(payload) ? payload : {};
+  const source = isRecord(outer.data) ? outer.data : outer;
+  const items = Array.isArray(source.endpoints) ? source.endpoints : [];
+  return {
+    id: typeof source.id === 'string' && source.id ? source.id : modelId,
+    name: typeof source.name === 'string' && source.name ? source.name : modelId,
+    endpoints: items.filter(isRecord).map(normalizeEndpointRecord),
+    fetchedAt
+  };
+}
+
+/** One endpoint of the roster. Prices become USD per million tokens, like the catalog's. */
+export function normalizeEndpointRecord(raw: Record<string, any>): ModelEndpoint {
+  const pricing = isRecord(raw.pricing) ? raw.pricing : {};
+  const providerName = typeof raw.provider_name === 'string' ? raw.provider_name : '';
+  const endpoint: ModelEndpoint = {
+    providerName,
+    providerSlug: typeof raw.tag === 'string' && raw.tag ? raw.tag : providerName,
+    name: typeof raw.name === 'string' && raw.name ? raw.name : providerName,
+    contextLength: numberOrUndefined(raw.context_length),
+    maxPromptTokens: numberOrUndefined(raw.max_prompt_tokens),
+    maxCompletionTokens: numberOrUndefined(raw.max_completion_tokens),
+    pricing: {
+      prompt: perMillion(pricing.prompt),
+      completion: perMillion(pricing.completion),
+      request: numberOrNull(pricing.request),
+      image: numberOrNull(pricing.image)
+    },
+    quantization: typeof raw.quantization === 'string' ? raw.quantization : undefined,
+    supportedParameters: stringArray(raw.supported_parameters),
+    latencyLast30m: numberOrNull(raw.latency_last_30m),
+    throughputLast30m: numberOrNull(raw.throughput_last_30m),
+    uptimeLast5m: numberOrNull(raw.uptime_last_5m),
+    uptimeLast30m: numberOrNull(raw.uptime_last_30m),
+    uptimeLast1d: numberOrNull(raw.uptime_last_1d)
+  };
+  if (typeof raw.supports_implicit_caching === 'boolean') {
+    endpoint.supportsImplicitCaching = raw.supports_implicit_caching;
+  }
+  const status = numberOrUndefined(raw.status);
+  if (status !== undefined) endpoint.status = status;
+  return endpoint;
 }
 
 /** Case-insensitive search over id, name and description; every term must match. */
@@ -518,6 +757,14 @@ function stringArray(value: unknown): string[] {
 function toInt(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? Math.trunc(number) : 0;
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && REASONING_EFFORTS.has(value);
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

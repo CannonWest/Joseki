@@ -2,6 +2,7 @@ import type {
   ChatCompleteEvent,
   ChatErrorEvent,
   ChatMessage,
+  ChatModel,
   ChatParams,
   ChatReasoningEvent,
   ChatSendRequest,
@@ -11,10 +12,11 @@ import type {
   ChatToolStartEvent,
   Conversation
 } from '@maestroai/shared';
-import { generateId } from '@maestroai/shared';
+import { generateId, mergePatch } from '@maestroai/shared';
 import { Database } from '../db/database';
 import {
   DEFAULT_CHAT_MODEL,
+  applyReasoningDefault,
   toWireMessages,
   type ChatRequest,
   type ChatResult,
@@ -40,6 +42,8 @@ export class ChatError extends Error {
 /** The slice of the provider the chat service depends on. */
 export interface ChatProvider {
   chatStream(request: ChatRequest, options?: { signal?: AbortSignal }): AsyncGenerator<ChatStreamEvent>;
+  /** The catalog record for a model id, when the provider has a catalog. */
+  findModel?(modelId: string): Promise<ChatModel | undefined>;
 }
 
 export interface ChatEvents {
@@ -144,7 +148,10 @@ export class ChatService {
 
     const conversationId = conversation.id;
     const model = request.model?.trim() || conversation.model;
-    const params: ChatParams = { ...conversation.params, ...(request.params ?? {}) };
+    // The turn's params override the conversation's as a JSON Merge Patch, so
+    // a nested field (a routing preference, the reasoning effort) can be set
+    // or cleared for one turn without restating the rest.
+    const params: ChatParams = mergePatch(conversation.params, request.params ?? {});
     const registry = params.tools === false ? NO_TOOLS : this.tools;
 
     // Store the user's message and make it the active leaf before calling out,
@@ -190,10 +197,14 @@ export class ChatService {
     };
 
     try {
+      // A model that advertises a default reasoning effort gets it unless the
+      // conversation chose otherwise. Looked up here, with the turn already
+      // marked in flight, so a slow catalog cannot let a second send through.
+      const turnParams = applyReasoningDefault(params, await this.lookupModel(model));
       const loop = runToolLoop(
         this.provider,
         registry,
-        { model, messages: wire, params },
+        { model, messages: wire, params: turnParams },
         {
           context: { db: this.db, conversationId, signal: controller.signal },
           signal: controller.signal
@@ -277,6 +288,17 @@ export class ChatService {
       emit(events.onComplete, { conversationId, message: reply });
     }
     return reply;
+  }
+
+  /** The model's catalog record — undefined when there is no catalog or it is unreachable; a turn never fails on it. */
+  private async lookupModel(modelId: string): Promise<ChatModel | undefined> {
+    if (!this.provider?.findModel) return undefined;
+    try {
+      return await this.provider.findModel(modelId);
+    } catch (error) {
+      console.warn(`Model lookup failed for ${modelId}:`, error instanceof Error ? error.message : error);
+      return undefined;
+    }
   }
 
   /** Stop the in-flight generation; what streamed so far is kept. */

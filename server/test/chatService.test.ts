@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
+import type { ChatModel, ChatParams, ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
 import { Database } from '../src/db/database';
 import {
   ChatError,
@@ -526,4 +526,83 @@ test('cancelling during a tool turn stores what happened and a stopped reply', a
   assert.equal(reply.content, '');
   assert.equal(reply.error, undefined);
   assert.equal(service.isGenerating(conversation.id), false);
+});
+
+/** A provider with a catalog: `findModel` answers from a fixed list, or fails. */
+class CatalogProvider extends FakeProvider {
+  constructor(
+    script: Script,
+    private readonly catalog: ChatModel[] | Error
+  ) {
+    super(script);
+  }
+
+  async findModel(modelId: string): Promise<ChatModel | undefined> {
+    if (this.catalog instanceof Error) throw this.catalog;
+    return this.catalog.find((model) => model.id === modelId);
+  }
+}
+
+const thinkingModel: ChatModel = {
+  id: 'test/thinker',
+  name: 'Thinker',
+  inputModalities: ['text'],
+  outputModalities: ['text'],
+  supportedParameters: ['reasoning'],
+  pricing: { prompt: 1, completion: 2, request: null, image: null },
+  reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['high', 'low'], defaultEffort: 'high' }
+};
+
+test('send merges per-turn params as a JSON Merge Patch over the conversation params', async () => {
+  const { db, provider, service } = setup(reply(['ok']));
+  const conversation = service.createConversation({
+    params: { routing: { order: ['anthropic'], zdr: true }, reasoning: { effort: 'low' } }
+  });
+
+  await service.send({
+    conversationId: conversation.id,
+    content: 'go',
+    params: { routing: { zdr: false }, reasoning: null, temperature: 0 } as unknown as ChatParams
+  });
+
+  assert.deepEqual(provider.requests[0].params, {
+    ...DEFAULT_CHAT_PARAMS,
+    temperature: 0,
+    routing: { order: ['anthropic'], zdr: false }
+  });
+  // A per-turn override never writes back to the conversation.
+  assert.deepEqual(db.getConversation(conversation.id)?.params.routing, { order: ['anthropic'], zdr: true });
+  assert.deepEqual(db.getConversation(conversation.id)?.params.reasoning, { effort: 'low' });
+});
+
+test('send applies the model default reasoning effort unless the conversation chose', async () => {
+  const db = new Database(':memory:');
+  const provider = new CatalogProvider(reply(['ok']), [thinkingModel]);
+  const service = new ChatService(db, provider, { defaultModel: 'test/thinker' });
+
+  const fresh = service.createConversation();
+  await service.send({ conversationId: fresh.id, content: 'think' });
+  assert.deepEqual(provider.requests[0].params?.reasoning, { effort: 'high' });
+  // The default is applied to the turn, not written into the conversation.
+  assert.equal(db.getConversation(fresh.id)?.params.reasoning, undefined);
+
+  const quiet = service.createConversation({ params: { reasoning: { enabled: false } } });
+  await service.send({ conversationId: quiet.id, content: 'no thinking' });
+  assert.deepEqual(provider.requests[1].params?.reasoning, { enabled: false });
+
+  const other = service.createConversation({ model: 'test/model' });
+  await service.send({ conversationId: other.id, content: 'plain' });
+  assert.equal(provider.requests[2].params?.reasoning, undefined);
+});
+
+test('send still runs when the model lookup fails', async () => {
+  const db = new Database(':memory:');
+  const provider = new CatalogProvider(reply(['ok']), new Error('catalog down'));
+  const service = new ChatService(db, provider, { defaultModel: 'test/thinker' });
+  const conversation = service.createConversation();
+
+  const final = await service.send({ conversationId: conversation.id, content: 'go' });
+  assert.equal(final.content, 'ok');
+  assert.equal(final.error, undefined);
+  assert.equal(provider.requests[0].params?.reasoning, undefined);
 });
