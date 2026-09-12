@@ -192,6 +192,45 @@ export interface ExecutionContext {
   };
 }
 
+// ==================== Run History ====================
+//
+// A run is recorded as it happens: one `executions` row, and one trace per
+// node that ran. These are the read shapes for that record — what the runs
+// list and a reopened run are built from.
+
+/** One past run, as stored. */
+export interface ExecutionRecord {
+  id: string;
+  workflowId: string;
+  status: ExecutionStatus;
+  /** Variables the run started with. Input values live in each input node's trace. */
+  context: Record<string, any>;
+  startedAt: number;
+  completedAt?: number;
+  error?: string;
+  parentExecutionId?: string;
+}
+
+/** A row in the runs list: the record plus what the traces add up to. */
+export interface ExecutionSummary extends ExecutionRecord {
+  workflowName?: string;
+  /** Traces written, counting a node that ran more than once each time. */
+  traceCount: number;
+  /** Distinct nodes the run touched. */
+  nodeCount: number;
+  totalCost: number;
+  totalTokens: number;
+}
+
+/**
+ * A run reopened. `traces` is the whole sequence in the order it happened —
+ * a node sent back by a gate appears once per attempt, so the rework is
+ * visible rather than collapsed.
+ */
+export interface ExecutionDetail extends ExecutionSummary {
+  traces: Array<ExecutionTrace & { nodeId: string }>;
+}
+
 // ==================== Execution Socket Protocol ====================
 //
 // Client → server: `execution:start`, `execution:resume`

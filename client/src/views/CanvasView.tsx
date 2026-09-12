@@ -32,6 +32,8 @@ import { useSocket } from '../hooks/useSocket';
 import { NodePalette } from '../components/NodePalette';
 import { NodeConfigPanel } from '../components/NodeConfigPanel';
 import { ExecutionLogPanel } from '../components/ExecutionLogPanel';
+import { RunHistoryPanel } from '../components/RunHistoryPanel';
+import { runWhen, statusTone } from '../runs/format';
 import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
@@ -109,6 +111,7 @@ function Flow({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [showRuns, setShowRuns] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
   const [showImport, setShowImport] = useState(openImportOnMount);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
@@ -118,7 +121,8 @@ function Flow({
   const { project } = useReactFlow();
   
   const { currentWorkflow, setCurrentWorkflow, persistWorkflow } = useWorkflowStore();
-  const { isExecuting, startExecution, currentExecutionId, pendingGate } = useExecutionStore();
+  const { isExecuting, startExecution, currentExecutionId, pendingGate, viewingRun, clearExecution } =
+    useExecutionStore();
   const { socket, isConnected, resumeGate, cancelExecution } = useSocket();
 
   useEffect(() => {
@@ -492,6 +496,8 @@ function Flow({
           isConnected={isConnected}
           onToggleLog={() => setShowLog(!showLog)}
           showLog={showLog}
+          onToggleRuns={() => setShowRuns(!showRuns)}
+          showRuns={showRuns}
           onOpenChat={handleOpenChat}
           onValidate={handleValidate}
           onExport={handleExport}
@@ -555,6 +561,28 @@ function Flow({
                   <span>Delete to remove</span>
                 </div>
               </Panel>
+
+              {/* A run reopened from history: the canvas shows what it produced,
+                  and says so, because nothing else distinguishes it from a run
+                  that just finished. */}
+              {viewingRun && !isExecuting && (
+                <Panel position="top-left" className="mt-4 ml-4">
+                  <div className="flex items-center gap-3 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 shadow-lg">
+                    <span className="text-xs text-slate-300">
+                      Past run · {runWhen(viewingRun.startedAt)} ·{' '}
+                      <span className={statusTone(viewingRun.status)}>{viewingRun.status}</span>
+                    </span>
+                    <div className="h-4 w-px bg-slate-600" />
+                    <button
+                      onClick={clearExecution}
+                      className="text-xs text-slate-400 hover:text-white transition-colors"
+                      title="Clear the results from the canvas"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </Panel>
+              )}
 
               {selectedEdge && (
                 <Panel position="top-center" className="mt-4">
@@ -628,6 +656,13 @@ function Flow({
           
           {showLog && (
             <ExecutionLogPanel onClose={() => setShowLog(false)} />
+          )}
+
+          {showRuns && (
+            <RunHistoryPanel
+              workflowId={currentWorkflow?.id}
+              onClose={() => setShowRuns(false)}
+            />
           )}
         </div>
       </div>

@@ -7,7 +7,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Visual Canvas**: Drag-and-drop workflow builder with React Flow
 - **Node Types**: Prompt, Branch, Aggregate, Human Gate, Model Compare
 - **Real-time Execution**: WebSocket streaming with live token output
-- **Time-travel Debugging**: Branch from any point in execution history
+- **Run History**: Every run recorded and reopenable on the canvas, results and all
 - **Model Comparison**: Compare outputs from multiple LLMs side-by-side
 - **Dark Mode**: Optimized for long coding sessions
 
@@ -81,6 +81,23 @@ joseki/
 | `/api/workflows/import` | POST | Create a workflow from an export envelope or bare workflow |
 | `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
 | `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
+
+## Run history
+
+Every run is recorded as it happens: one row for the run, one trace per node — its input, its output, tokens, cost, latency and outcome. **Runs** in the toolbar lists the past runs of the workflow on the canvas, newest first, with what each one touched and what it cost.
+
+Picking a run puts it back on the canvas: every node that ran shows the status and output it ended with, output nodes show their result again, and the log reads the run back node by node. A banner says which run you are looking at, **Clear** takes it off, and running the workflow replaces it. So a result outlives the reload that used to lose it.
+
+A node a human gate sent back ran more than once, and the history keeps every attempt rather than collapsing them — that is why a run can list more attempts than nodes. On the canvas each node shows its **last** attempt, which is the state the run ended in; the log shows the sequence.
+
+Runs start over socket.io (`execution:start`), which is the only way to start one — it is the path that streams node events and pauses at human gates.
+
+### API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/executions` | GET | Past runs, newest first, each with its trace count, distinct nodes, total cost and tokens. `?workflowId=` narrows to one workflow; `?limit=` caps the list (default 50, max 200) |
+| `/api/executions/:id` | GET | One run with `traces`, the whole sequence in the order it happened; `404` for a run that does not exist |
 
 ## Chat
 

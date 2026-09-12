@@ -5,6 +5,8 @@ interface ToolbarProps {
   isConnected: boolean;
   onToggleLog: () => void;
   showLog: boolean;
+  onToggleRuns: () => void;
+  showRuns: boolean;
   onOpenChat: () => void;
   onValidate: () => void;
   onExport: () => void;
@@ -21,6 +23,8 @@ export function Toolbar({
   isConnected,
   onToggleLog,
   showLog,
+  onToggleRuns,
+  showRuns,
   onOpenChat,
   onValidate,
   onExport,
@@ -58,6 +62,18 @@ export function Toolbar({
 
       <button onClick={onOpenChat} className={secondaryButton} title="Chat with any model on OpenRouter">
         Chat
+      </button>
+
+      <button
+        onClick={onToggleRuns}
+        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+          showRuns
+            ? 'bg-blue-600 text-white'
+            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+        }`}
+        title="Open a past run of this workflow"
+      >
+        Runs
       </button>
 
       <button

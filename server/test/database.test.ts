@@ -216,3 +216,140 @@ test('opening a database from before reasoning_details adds the column and keeps
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ==================== Run history ====================
+
+function trace(
+  executionId: string,
+  nodeId: string,
+  timestamp: number,
+  overrides: Partial<Parameters<Database['createExecutionTrace']>[0]> = {}
+) {
+  return {
+    executionId,
+    nodeId,
+    runId: executionId,
+    timestamp,
+    input: null,
+    output: `${nodeId} output`,
+    tokenUsage: { prompt: 10, completion: 5, total: 15 },
+    cost: 0.001,
+    latencyMs: 100,
+    status: 'success' as const,
+    ...overrides
+  };
+}
+
+function historyFixture() {
+  const db = new Database(':memory:');
+  const [workflow] = db.getAllWorkflows();
+
+  db.createExecution({ id: 'run-old', workflowId: workflow.id, status: 'error', context: {}, startedAt: 1000 });
+  db.updateExecutionStatus('run-old', 'error', 'it broke', 1500);
+  db.createExecutionTrace(trace('run-old', 'a', 1100, { status: 'error', error: 'it broke', cost: 0 }));
+
+  db.createExecution({
+    id: 'run-new',
+    workflowId: workflow.id,
+    status: 'running',
+    context: { topic: 'bees' },
+    startedAt: 2000
+  });
+  db.updateExecutionStatus('run-new', 'success', undefined, 2900);
+  // Node "a" ran twice — a gate sent it back — and "b" was never reached.
+  db.createExecutionTrace(trace('run-new', 'a', 2100));
+  db.createExecutionTrace(trace('run-new', 'gate', 2200));
+  db.createExecutionTrace(trace('run-new', 'a', 2300, { output: 'a redraft' }));
+  db.createExecutionTrace(trace('run-new', 'b', 2400, { status: 'skipped', cost: 0, tokenUsage: { prompt: 0, completion: 0, total: 0 } }));
+
+  return { db, workflowId: workflow.id, workflowName: workflow.name };
+}
+
+test('a past run reads back with its status, error and context', () => {
+  const { db } = historyFixture();
+
+  const failed = db.getExecution('run-old');
+  assert.equal(failed?.status, 'error');
+  assert.equal(failed?.error, 'it broke');
+  assert.equal(failed?.completedAt, 1500);
+
+  const finished = db.getExecution('run-new');
+  assert.deepEqual(finished?.context, { topic: 'bees' });
+  assert.equal(finished?.parentExecutionId, undefined);
+
+  assert.equal(db.getExecution('no-such-run'), undefined);
+  db.close();
+});
+
+test('the runs list is most recent first and rolls up the traces', () => {
+  const { db, workflowName } = historyFixture();
+  const runs = db.listExecutions();
+
+  assert.deepEqual(runs.map((r) => r.id), ['run-new', 'run-old']);
+  assert.equal(runs[0].workflowName, workflowName);
+
+  // Four traces over three distinct nodes: "a" ran twice.
+  assert.equal(runs[0].traceCount, 4);
+  assert.equal(runs[0].nodeCount, 3);
+  assert.equal(runs[0].totalCost, 0.003);
+  assert.equal(runs[0].totalTokens, 45);
+  db.close();
+});
+
+test('the runs list narrows by workflow and caps at the limit', () => {
+  const { db, workflowId } = historyFixture();
+
+  assert.equal(db.listExecutions({ workflowId }).length, 2);
+  assert.deepEqual(db.listExecutions({ workflowId: 'some-other-workflow' }), []);
+  assert.deepEqual(db.listExecutions({ limit: 1 }).map((r) => r.id), ['run-new']);
+  db.close();
+});
+
+test('a run that wrote no traces still lists, with zeroes', () => {
+  const { db, workflowId } = historyFixture();
+  db.createExecution({ id: 'run-empty', workflowId, status: 'running', context: {}, startedAt: 3000 });
+
+  const [newest] = db.listExecutions({ limit: 1 });
+  assert.equal(newest.id, 'run-empty');
+  assert.equal(newest.traceCount, 0);
+  assert.equal(newest.nodeCount, 0);
+  assert.equal(newest.totalCost, 0);
+  assert.equal(newest.totalTokens, 0);
+  db.close();
+});
+
+test('a single run reads back with the same rollups the list shows', () => {
+  const { db } = historyFixture();
+
+  assert.deepEqual(db.getExecutionSummary('run-new'), db.listExecutions({ limit: 1 })[0]);
+  assert.equal(db.getExecutionSummary('no-such-run'), undefined);
+  db.close();
+});
+
+test('traces come back in the order they happened, a reworked node once per attempt', () => {
+  const { db } = historyFixture();
+  const traces = db.getExecutionTraces('run-new');
+
+  assert.deepEqual(traces.map((t) => t.nodeId), ['a', 'gate', 'a', 'b']);
+  assert.deepEqual(traces.map((t) => t.output), ['a output', 'gate output', 'a redraft', 'b output']);
+  assert.equal(traces[3].status, 'skipped');
+  assert.equal(traces[0].runId, 'run-new');
+  assert.deepEqual(traces[0].tokenUsage, { prompt: 10, completion: 5, total: 15 });
+
+  assert.deepEqual(db.getExecutionTraces('no-such-run'), []);
+  db.close();
+});
+
+test('traces sharing a millisecond keep their insertion order', () => {
+  const { db, workflowId } = historyFixture();
+  db.createExecution({ id: 'run-tie', workflowId, status: 'success', context: {}, startedAt: 4000 });
+  db.createExecutionTrace(trace('run-tie', 'first', 4100));
+  db.createExecutionTrace(trace('run-tie', 'second', 4100));
+  db.createExecutionTrace(trace('run-tie', 'third', 4100));
+
+  assert.deepEqual(
+    db.getExecutionTraces('run-tie').map((t) => t.nodeId),
+    ['first', 'second', 'third']
+  );
+  db.close();
+});

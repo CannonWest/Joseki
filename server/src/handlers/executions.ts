@@ -1,91 +1,38 @@
 import { Router } from 'express';
-import { generateId, validateWorkflow } from '@joseki/shared';
 import { Database } from '../db/database';
-import { WorkflowExecutor } from '../engine/executor';
 
 const router = Router();
 
-// Start execution
-router.post('/:workflowId', async (req, res) => {
+// Runs are started over socket.io (`execution:start`), which is the only
+// path: it streams node events and pauses at human gates. A second REST
+// starter used to live here and did neither — a gated workflow started that
+// way hung at the gate with nothing to answer it — so it was removed rather
+// than kept as a copy that silently lacks the feature.
+
+/**
+ * Past runs, most recent first. `?workflowId=` narrows to one workflow,
+ * `?limit=` caps the list (default 50).
+ */
+router.get('/', (req, res) => {
   const db = (req as any).db as Database;
-  const workflow = db.getWorkflow(req.params.workflowId);
+  const workflowId = typeof req.query.workflowId === 'string' ? req.query.workflowId : undefined;
 
-  if (!workflow) {
-    return res.status(404).json({ error: 'Workflow not found' });
-  }
+  const requested = Number(req.query.limit);
+  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 200) : 50;
 
-  const validation = validateWorkflow(workflow);
-  if (!validation.valid) {
-    return res.status(400).json({ error: 'Workflow is not runnable', validation });
-  }
-
-  const executionId = generateId();
-  const startNodeId = req.body.startNodeId;
-  const context = req.body.context || {};
-  const inputs = req.body.inputs;
-  
-  // Create execution record
-  db.createExecution({
-    id: executionId,
-    workflowId: workflow.id,
-    status: 'running',
-    context,
-    startedAt: Date.now()
-  });
-  
-  // Start execution asynchronously
-  const executor = new WorkflowExecutor(db);
-  
-  // Return execution ID immediately
-  res.status(202).json({ executionId, status: 'running' });
-  
-  // Continue execution in background
-  try {
-    await executor.execute(workflow, executionId, {
-      startNodeId,
-      context,
-      inputs
-    });
-    
-    db.updateExecutionStatus(executionId, 'success', undefined, Date.now());
-  } catch (error) {
-    db.updateExecutionStatus(
-      executionId,
-      'error',
-      error instanceof Error ? error.message : String(error),
-      Date.now()
-    );
-  }
+  res.json(db.listExecutions({ workflowId, limit }));
 });
 
-// Get execution status
+/** One run with every trace it wrote, in the order they happened. */
 router.get('/:executionId', (req, res) => {
   const db = (req as any).db as Database;
-  
-  // This would need a getExecution method on Database
-  // For now, return placeholder
-  res.json({ 
-    id: req.params.executionId,
-    status: 'running',
-    timestamp: Date.now()
-  });
-});
 
-// Branch from execution
-router.post('/:executionId/branch', async (req, res) => {
-  const db = (req as any).db as Database;
-  const { nodeId, modifications } = req.body;
-  
-  const newExecutionId = generateId();
-  
-  // Clone execution with modifications
-  // This would need more implementation
-  
-  res.status(201).json({ 
-    executionId: newExecutionId,
-    parentExecutionId: req.params.executionId,
-    branchedFromNode: nodeId
-  });
+  const execution = db.getExecutionSummary(req.params.executionId);
+  if (!execution) {
+    return res.status(404).json({ error: 'Execution not found' });
+  }
+
+  res.json({ ...execution, traces: db.getExecutionTraces(execution.id) });
 });
 
 export { router as executionRoutes };

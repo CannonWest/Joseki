@@ -4,6 +4,8 @@ import nodePath from 'path';
 import type {
   Workflow,
   ExecutionTrace,
+  ExecutionRecord,
+  ExecutionSummary,
   ModelConfig,
   Conversation,
   ChatMessage
@@ -334,6 +336,99 @@ export class Database {
       trace.error || null,
       trace.timestamp
     );
+  }
+
+  /** One past run, or undefined when no run has that id. */
+  getExecution(id: string): ExecutionRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM executions WHERE id = ?').get(id) as any;
+    return row ? this.parseExecution(row) : undefined;
+  }
+
+  /**
+   * Past runs with their rollups, most recent first — all of them, one
+   * workflow's, or a single run by id. One query serves the runs list and a
+   * reopened run, so a total shown in the list is the total shown on the run.
+   * The rollups come from the traces by outer join, so a run whose traces
+   * were never written still appears, with zeroes.
+   */
+  listExecutions(
+    options: { id?: string; workflowId?: string; limit?: number } = {}
+  ): ExecutionSummary[] {
+    const { id, workflowId, limit = 50 } = options;
+    const rows = this.db
+      .prepare(
+        `SELECT e.*, w.name AS workflow_name,
+                COUNT(t.id) AS trace_count,
+                COUNT(DISTINCT t.node_id) AS node_count,
+                COALESCE(SUM(t.cost), 0) AS total_cost,
+                COALESCE(SUM(json_extract(t.token_usage, '$.total')), 0) AS total_tokens
+           FROM executions e
+           LEFT JOIN workflows w ON w.id = e.workflow_id
+           LEFT JOIN execution_traces t ON t.execution_id = e.id
+          WHERE (? IS NULL OR e.id = ?)
+            AND (? IS NULL OR e.workflow_id = ?)
+          GROUP BY e.id
+          ORDER BY e.started_at DESC
+          LIMIT ?`
+      )
+      .all(id ?? null, id ?? null, workflowId ?? null, workflowId ?? null, limit) as any[];
+    return rows.map((row) => this.parseExecutionSummary(row));
+  }
+
+  /** One past run with its rollups, or undefined when no run has that id. */
+  getExecutionSummary(id: string): ExecutionSummary | undefined {
+    return this.listExecutions({ id, limit: 1 })[0];
+  }
+
+  /**
+   * Every trace of a run, in the order it happened. A node a gate sent back
+   * appears once per attempt — the sequence is the history, so nothing is
+   * collapsed here. `rowid` breaks ties: two traces can share a millisecond.
+   */
+  getExecutionTraces(executionId: string): Array<ExecutionTrace & { nodeId: string }> {
+    const rows = this.db
+      .prepare('SELECT * FROM execution_traces WHERE execution_id = ? ORDER BY timestamp, rowid')
+      .all(executionId) as any[];
+    return rows.map((row) => this.parseExecutionTrace(row));
+  }
+
+  private parseExecution(row: any): ExecutionRecord {
+    return {
+      id: row.id,
+      workflowId: row.workflow_id,
+      status: row.status,
+      context: JSON.parse(row.context),
+      startedAt: row.started_at,
+      completedAt: row.completed_at ?? undefined,
+      error: row.error ?? undefined,
+      parentExecutionId: row.parent_execution_id ?? undefined
+    };
+  }
+
+  private parseExecutionSummary(row: any): ExecutionSummary {
+    return {
+      ...this.parseExecution(row),
+      workflowName: row.workflow_name ?? undefined,
+      traceCount: row.trace_count,
+      nodeCount: row.node_count,
+      totalCost: row.total_cost,
+      totalTokens: row.total_tokens
+    };
+  }
+
+  private parseExecutionTrace(row: any): ExecutionTrace & { nodeId: string } {
+    return {
+      runId: row.execution_id,
+      nodeId: row.node_id,
+      timestamp: row.timestamp,
+      input: JSON.parse(row.input),
+      output: JSON.parse(row.output),
+      tokenUsage: JSON.parse(row.token_usage),
+      cost: row.cost,
+      latencyMs: row.latency_ms,
+      status: row.status,
+      error: row.error ?? undefined
+    };
   }
 
   // Model config operations
