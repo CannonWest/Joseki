@@ -174,3 +174,100 @@ test('the shipped example workflow validates with no errors and no warnings', ()
   assert.deepEqual(result.warnings, []);
   assert.equal(result.valid, true);
 });
+
+// ==================== branch conditions ====================
+
+/** in → branch ─true→ yes, ─false→ no. Edges are overridable for the wiring cases. */
+function branched(condition, edges) {
+  return workflow(
+    [
+      node('in', 'input'),
+      node('branch', 'branch', { condition }),
+      node('yes', 'output'),
+      node('no', 'output'),
+    ],
+    edges ?? [
+      edge('e1', 'in', 'branch'),
+      { id: 'e2', source: 'branch', target: 'yes', sourceHandle: 'true' },
+      { id: 'e3', source: 'branch', target: 'no', sourceHandle: 'false' },
+    ]
+  );
+}
+
+test('a branch sizing its input is a condition the validator is happy with', () => {
+  const result = validateWorkflow(branched('length(input) > 500'));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('a condition that does not parse is caught before the run', () => {
+  const result = validateWorkflow(branched('length(input) >'));
+  assert.equal(result.valid, true, 'a bad condition is a warning, not an error');
+  assert.ok(result.warnings.some((w) => w.includes('does not parse')));
+});
+
+test('a condition reading a name nothing supplies is caught before the run', () => {
+  const result = validateWorkflow(branched('score > 0.5'));
+  assert.ok(result.warnings.some((w) => w.includes('reads "score", which nothing supplies')));
+});
+
+test('a hyphenated node id written bare is caught, with the way to write it', () => {
+  // The canvas mints every id as `${type}-${Date.now()}`, so this is the shape
+  // an author actually reaches for, and a hyphen is subtraction to the parser.
+  const wf = branched('prompt-1757712345678 == "x"');
+  wf.nodes.push(node('prompt-1757712345678', 'prompt', { model: 'gpt-4', userPrompt: 'x' }));
+  wf.edges.push(edge('e4', 'in', 'prompt-1757712345678'));
+  const warning = validateWorkflow(wf).warnings.find((w) => w.includes('reads "prompt"'));
+  assert.ok(warning, 'the bare id should warn');
+  assert.match(warning, /get\(nodes, "the-id"\)/);
+});
+
+test('the same node reached through nodes is fine', () => {
+  const wf = branched('get(nodes, "prompt-1757712345678.score") > 0.5');
+  wf.nodes.push(node('prompt-1757712345678', 'prompt', { model: 'gpt-4', userPrompt: 'x' }));
+  wf.edges.push(edge('e4', 'in', 'prompt-1757712345678'));
+  assert.equal(
+    validateWorkflow(wf).warnings.some((w) => w.includes('nothing supplies')),
+    false
+  );
+});
+
+test('the flat name of a node, and its _output form, are both supplied', () => {
+  const wf = branched('example_draft == "x" and length(example_draft_output) > 0');
+  wf.nodes.push(node('example_draft', 'prompt', { model: 'gpt-4', userPrompt: 'x' }));
+  wf.edges.push(edge('e4', 'in', 'example_draft'));
+  assert.equal(
+    validateWorkflow(wf).warnings.some((w) => w.includes('nothing supplies')),
+    false
+  );
+});
+
+test('a branch missing one of its two arrows warns that the path ends there', () => {
+  const wf = branched('length(input) > 500', [
+    edge('e1', 'in', 'branch'),
+    { id: 'e2', source: 'branch', target: 'yes', sourceHandle: 'true' },
+  ]);
+  assert.ok(validateWorkflow(wf).warnings.some((w) => w.includes('no false arrow: that path ends here')));
+});
+
+test('an arrow off a branch with no handle warns that it fires either way', () => {
+  const wf = branched('length(input) > 500', [
+    edge('e1', 'in', 'branch'),
+    edge('e2', 'branch', 'yes'),
+    { id: 'e3', source: 'branch', target: 'no', sourceHandle: 'false' },
+  ]);
+  assert.ok(
+    validateWorkflow(wf).warnings.some((w) => w.includes('fires whichever way the condition goes'))
+  );
+});
+
+test('an arrow on a handle a branch can never choose warns', () => {
+  const wf = branched('length(input) > 500', [
+    edge('e1', 'in', 'branch'),
+    { id: 'e2', source: 'branch', target: 'yes', sourceHandle: 'true' },
+    { id: 'e3', source: 'branch', target: 'no', sourceHandle: 'long' },
+  ]);
+  const warnings = validateWorkflow(wf).warnings;
+  assert.ok(warnings.some((w) => w.includes('arrow on "long", which it can never choose')));
+  assert.ok(warnings.some((w) => w.includes('no false arrow')));
+});

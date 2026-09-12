@@ -47,7 +47,7 @@ import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
 import { ModelCompareNode } from '../nodes/ModelCompareNode';
 import { RoutedEdge } from '../edges/RoutedEdge';
-import { validateWorkflow, DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
+import { validateWorkflow, DEFAULT_BRANCH_CONDITION, DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
 const nodeTypes = {
@@ -433,8 +433,11 @@ function Flow({
               strategy: 'concat'
             };
           case 'branch':
+            // Not `context.input.includes(...)`: that is JavaScript, and a
+            // condition is an expression the parser evaluates, so every branch
+            // dropped on the canvas used to fail on its first run.
             return {
-              condition: 'context.input.includes("yes")'
+              condition: DEFAULT_BRANCH_CONDITION
             };
           case 'human_gate':
             return {

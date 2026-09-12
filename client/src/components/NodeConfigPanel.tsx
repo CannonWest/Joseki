@@ -1,7 +1,13 @@
 import { useState, useMemo } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
-import { DEFAULT_MAX_ATTEMPTS, DEFAULT_WORKFLOW_MODEL, MAX_ATTEMPTS } from '@joseki/shared';
+import {
+  CONDITION_VOCABULARY,
+  DEFAULT_BRANCH_CONDITION,
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_WORKFLOW_MODEL,
+  MAX_ATTEMPTS
+} from '@joseki/shared';
 import type { ChatParamsPatch, OutputFormat } from '@joseki/shared';
 import { useChatStore } from '../stores/chatStore';
 import { useExecutionStore } from '../stores/executionStore';
@@ -349,7 +355,7 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                 <Editor
                   height="100%"
                   defaultLanguage="plaintext"
-                  value={config.condition || 'input == "yes"'}
+                  value={config.condition ?? DEFAULT_BRANCH_CONDITION}
                   onChange={(v) => setConfig({ ...config, condition: v })}
                   theme="vs-dark"
                   options={{
@@ -360,12 +366,44 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                   }}
                 />
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Safe expressions only. Available variables: upstream node IDs
-                and <code className="text-slate-400">input</code>.
-                Examples: <code className="text-slate-400">input == "yes"</code>,
-                <code className="text-slate-400"> score {'>'} 0.5</code>
-              </p>
+              <div className="text-xs text-slate-500 mt-1 space-y-1">
+                <p>
+                  Decides <code className="text-slate-400">true</code> or{' '}
+                  <code className="text-slate-400">false</code> — which arrow fires.
+                  Reads <code className="text-slate-400">input</code> (what arrived),{' '}
+                  <code className="text-slate-400">inputs</code> and{' '}
+                  <code className="text-slate-400">nodes</code>.
+                </p>
+                <ul className="space-y-0.5 pl-3">
+                  <li>
+                    <code className="text-slate-400">length(input) {'>'} 500</code> — how much
+                    text came back
+                  </li>
+                  <li>
+                    <code className="text-slate-400">contains(lower(input), "approved")</code> —
+                    what it says
+                  </li>
+                  <li>
+                    <code className="text-slate-400">get(input, "score") {'>'} 0.5</code> — a
+                    field, through the JSON around it
+                  </li>
+                  <li>
+                    <code className="text-slate-400">get(nodes, "prompt-123.score")</code> — an
+                    earlier node, hyphenated id and all
+                  </li>
+                </ul>
+                <p>
+                  Functions:{' '}
+                  <code className="text-slate-400">{CONDITION_VOCABULARY.join(', ')}</code>, plus{' '}
+                  <code className="text-slate-400">length</code>,{' '}
+                  <code className="text-slate-400">if</code>,{' '}
+                  <code className="text-slate-400">and</code>,{' '}
+                  <code className="text-slate-400">or</code>,{' '}
+                  <code className="text-slate-400">not</code>. A node id with a hyphen has to go
+                  through <code className="text-slate-400">get(nodes, "…")</code> — bare, the
+                  hyphen reads as subtraction.
+                </p>
+              </div>
             </div>
           </div>
         );

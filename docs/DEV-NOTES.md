@@ -96,6 +96,29 @@ nothing is billed.
 - **The example workflow's `Quality Check` keeps a `1 == 0` condition on
   purpose.** It sends every run down the revision path, which is what makes
   the example exercise the interesting half of the graph. It is not a bug.
+- **A branch condition cannot dot into a call's result.** `json(input).score`
+  does not parse — member access attaches to names, not to calls, and the
+  error is a bare `Expected EOF`. That is why the accessor takes a path,
+  `get(input, "score")`, and why `get` parses JSON as it descends rather than
+  handing back an object to walk.
+- **`expr-eval`'s own `length` stringifies first**, so `length(x)` on a node
+  that produced nothing answers 4 — the width of the word `null`.
+  `conditions.ts` overrides the operator to coerce through `asText` first. Any
+  other borrowed operator deserves the same suspicion.
+- **Nothing in a condition is `undefined`, never `null`.** `null > -1` is true
+  in JavaScript, because null counts as zero, so a missing field would clear a
+  threshold it never reached; `undefined` compares as NaN and every comparison
+  against it reads false. There is deliberately no `null` keyword either — a
+  parser constant holding `undefined` evaluates to `0`, and one holding `null`
+  matches neither a missing field nor unparsed JSON.
+- **`expr-eval` refuses some member names at parse time** — `constructor` and
+  `length` among them — so `nodes.draft.length` is a parse error; ask
+  `length(nodes.draft)`. `get` takes its path as a string and so slips past
+  that check, which is why it re-states the guard itself.
+- **`shared` has exactly one runtime dependency, `expr-eval`,** because the
+  condition language is part of the workflow contract: the executor evaluates
+  conditions and the validator parses them, and both sides have to agree.
+  Anything else added to `shared` ships to the client bundle too.
 - **No default `React` import** in a component — the JSX transform does not
   need it and the client build fails on the unused binding.
 - **`ReactFlowProvider` stays inside `CanvasView`.** Hoisting it above the

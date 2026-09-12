@@ -110,6 +110,46 @@ OpenRouter publishes a `:batch` variant of many models — around half price, se
 
 Joseki only makes chat completions, so `/api/models` leaves them out rather than offering a choice that could not have worked — 77 of 445 at the time of writing, every one of them with a plain sibling in the catalog. The provider's own catalog keeps them, so a workflow stored against one is still recognised. For a discount that *does* work here, set **Speed / price** to `flex`.
 
+## Branching
+
+A branch node decides **true** or **false**, and the arrow on that handle fires while the other path is skipped. Its **Condition** is an expression, not JavaScript — nothing in it can call out of itself, so a condition is data the same way a prompt is.
+
+Three names are in scope, the same three a prompt template sees:
+
+| Name | What it holds |
+|------|---------------|
+| `input` | What arrived on the first arrow into the branch, as text |
+| `inputs` | Every arrow into the branch, keyed by the node it came from |
+| `nodes` | Every node that has run so far, keyed by id |
+
+Past arithmetic, comparison, `and` / `or` / `not` and `if(…)`, the vocabulary is:
+
+| | |
+|---|---|
+| `length(x)` | How much text — `length(input) > 500` |
+| `words(x)` | Whitespace-separated words |
+| `contains(x, s)`, `startsWith(x, s)`, `endsWith(x, s)` | What the text says |
+| `lower(x)`, `upper(x)`, `trim(x)` | Fold it before comparing |
+| `number(x)` | Text as a number; blank text is not zero but NaN, so a threshold is never crossed by an empty answer |
+| `isEmpty(x)` | Nothing, blank, or a field that was not there |
+| `json(x)` | Text parsed as JSON |
+| `get(x, "a.b")` | Walk a path, parsing JSON on the way down |
+
+`get` is the one that does the work. A prompt node's output is always a string, so a field the model reported is behind a parse — and a call's result cannot be dotted into, because member access attaches to names. One call reaches it either way:
+
+```
+length(input) > 500                      how much came back
+contains(lower(input), "approved")       what it says
+get(input, "score") > 0.5                a field, through the JSON around it
+get(nodes, "prompt-1757.score") > 0.5    an earlier node's field
+```
+
+**A node id with a hyphen has to go through `get`.** The canvas mints every id as `${type}-${Date.now()}`, and a hyphen is subtraction to the parser — `prompt-1757 == "x"` reads as `prompt` minus `1757`. Written as `get(nodes, "prompt-1757")` it works. An id the parser can read as a name — the example workflow's `example_draft` — is also in scope flat, which is how conditions were written before there was a `nodes` object.
+
+Nothing compares as nothing, never as zero: a field that was not there fails `> 0.5` *and* `< 1`, rather than clearing a threshold it never reached. Ask `isEmpty(x)` to test for it on purpose; there is no `null` keyword.
+
+**Validate** reads conditions at edit time — a condition that does not parse, one that reads a name nothing will supply, a branch missing its true or false arrow, and an arrow on a handle a branch can never choose. At run time a condition that decides something other than true or false stops the run and says so, rather than quietly killing every path out of the node.
+
 ## When a node fails
 
 A prompt node can say what should happen when the model refuses, times out or errors — **On Error** in its config panel:

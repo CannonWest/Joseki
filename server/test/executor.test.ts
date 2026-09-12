@@ -329,6 +329,78 @@ test('the same branch takes the other arrow when the condition flips', async () 
   assert.equal(ctx.out.output, '<gpt-4: no:false>');
 });
 
+test('a branch can route on the size of what reached it', async () => {
+  const long = harness(forked('length(input) > 500'), { inputs: { in: 'x'.repeat(640) } });
+  await long.run();
+  assert.deepEqual(long.started, ['in', 'branch', 'yes', 'merge', 'out']);
+
+  const short = harness(forked('length(input) > 500'), { inputs: { in: 'x'.repeat(499) } });
+  await short.run();
+  assert.deepEqual(short.started, ['in', 'branch', 'no', 'merge', 'out']);
+});
+
+test('a branch can route on a field the model reported', async () => {
+  const h = harness(forked('get(input, "score") > 0.5'), {
+    inputs: { in: '{"score": 0.82, "verdict": "approved"}' }
+  });
+  await h.run();
+  assert.deepEqual(h.started, ['in', 'branch', 'yes', 'merge', 'out']);
+});
+
+test('a branch can route on words and on text it contains', async () => {
+  const h = harness(forked('words(input) > 3 and contains(lower(input), "urgent")'), {
+    inputs: { in: 'This one is URGENT, please look' }
+  });
+  await h.run();
+  assert.deepEqual(h.started, ['in', 'branch', 'yes', 'merge', 'out']);
+});
+
+// in → prompt-1757 → branch ─true──→ yes ─┐
+//                          └false─→ no ───┴→ merge → out
+// The hyphen is what matters: it is the shape of every id the canvas mints.
+const afterHyphenatedNode = (condition: string) =>
+  workflow(
+    'hyphenated',
+    [
+      node('in', 'input'),
+      prompt('prompt-1757', '{{input}}'),
+      node('branch', 'branch', { condition }),
+      prompt('yes', 'yes'),
+      prompt('no', 'no'),
+      node('merge', 'aggregate', { strategy: 'concat' }),
+      node('out', 'output')
+    ],
+    [
+      edge('in', 'prompt-1757'),
+      edge('prompt-1757', 'branch'),
+      edge('branch', 'yes', 'true'),
+      edge('branch', 'no', 'false'),
+      edge('yes', 'merge'),
+      edge('no', 'merge'),
+      edge('merge', 'out')
+    ]
+  );
+
+test('a node whose id has a hyphen is reachable through nodes', async () => {
+  const h = harness(afterHyphenatedNode('contains(get(nodes, "prompt-1757"), "gpt-4")'), {
+    inputs: { in: 'anything' }
+  });
+  await h.run();
+  assert.deepEqual(h.started, ['in', 'prompt-1757', 'branch', 'yes', 'merge', 'out']);
+});
+
+test('naming that node bare is subtraction, and the run says so', async () => {
+  const h = harness(afterHyphenatedNode('prompt-1757 == "x"'), { inputs: { in: 'anything' } });
+  await assert.rejects(h.run(), /could not be evaluated.*get\(nodes, "prompt-123"\)/s);
+});
+
+test('a condition that decides something other than true or false stops the run', async () => {
+  // Before, every arrow out of the branch quietly died and the run "finished"
+  // with its output node skipped.
+  const h = harness(forked('if(length(input) > 500, "long", "short")'), { inputs: { in: 'short' } });
+  await assert.rejects(h.run(), /decided "short" rather than true or false/);
+});
+
 test('aggregate joins only the arrows into it, in arrow order', async () => {
   const wf = workflow(
     'fan',

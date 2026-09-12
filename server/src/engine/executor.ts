@@ -9,21 +9,19 @@ import type {
   GateDecision
 } from '@joseki/shared';
 import {
+  asText,
   calculateCost,
   DEFAULT_GATE_TIMEOUT_SECONDS,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_MAX_REVISIONS,
+  evaluateCondition,
   MAX_ATTEMPTS,
   promptParams
 } from '@joseki/shared';
 import Handlebars from 'handlebars';
-import { Parser as ExprParser } from 'expr-eval';
 import { LLMAdapter, type Generator } from '../adapters/llm';
 import { Database } from '../db/database';
 import { GateRegistry, gates as sharedGates } from './gates';
-
-// Create a single parser instance for safe branch condition evaluation
-const safeExprParser = new ExprParser();
 
 // Prompts are model input, not HTML: a quote in an upstream summary must reach
 // the next model as a quote, not as &quot;.
@@ -569,6 +567,20 @@ export class WorkflowExecutor {
     };
   }
 
+  /**
+   * Decides which arrow out of a branch fires.
+   *
+   * The condition is read against the same three names a template sees —
+   * `input`, `inputs` and `nodes` — so what a prompt interpolates and what a
+   * branch tests are the same thing said twice. `input` is text, because that
+   * is what a condition compares; `inputs` and `nodes` carry the raw outputs,
+   * so `get(nodes, "prompt-123.score")` can reach a field a model reported.
+   *
+   * Every node also keeps a flat name, which is how conditions were written
+   * before there was a `nodes` object. Only ids the parser can read as a name
+   * arrive that way — a hyphen is subtraction to it, and the canvas hyphenates
+   * every id it mints — so `nodes` is the one that always works.
+   */
   private async executeBranchNode(
     node: WorkflowNode,
     inputs: NodeInput[],
@@ -577,32 +589,38 @@ export class WorkflowExecutor {
     const config = node.data.config as any;
     const conditionStr: string = config.condition || 'true';
 
-    // Build a flat evaluation scope from the execution context.
-    // This gives expressions access to node outputs without arbitrary code execution.
-    const scope: Record<string, any> = {};
+    const byNode: Record<string, unknown> = {};
+    for (const [nodeId, nodeCtx] of Object.entries(context)) byNode[nodeId] = nodeCtx.output;
 
-    for (const [nodeId, nodeCtx] of Object.entries(context)) {
-      const output = nodeCtx.output;
+    const byInput: Record<string, unknown> = {};
+    for (const i of inputs) byInput[i.nodeId] = i.output;
+
+    const scope: Record<string, unknown> = {
+      nodes: byNode,
+      inputs: byInput,
+      // What arrived on the first arrow into this node.
+      input: inputs.length ? asText(inputs[0].output) : ''
+    };
+
+    for (const [nodeId, output] of Object.entries(byNode)) {
       scope[nodeId] = asText(output);
       scope[`${nodeId}_output`] = output;
     }
 
-    // "input" is what arrived on the first arrow into this node.
-    if (inputs.length) {
-      scope['input'] = asText(inputs[0].output);
-    }
+    const result = evaluateCondition(conditionStr, scope);
 
-    try {
-      const expr = safeExprParser.parse(conditionStr);
-      const result = expr.evaluate(scope);
-      return String(result);
-    } catch (exprErr) {
+    // A branch has two arrows, `true` and `false`, and the result names the one
+    // that fires. Anything else names an arrow that does not exist, and every
+    // path out of the node would quietly die — so say so instead.
+    if (typeof result !== 'boolean') {
       throw new Error(
-        `Branch condition "${conditionStr}" could not be evaluated safely: ` +
-        `${exprErr instanceof Error ? exprErr.message : String(exprErr)}. ` +
-        `Use simple expressions like: input == "yes", score > 0.5, nodeId_output == "approved"`
+        `Branch condition "${conditionStr}" decided ${JSON.stringify(result)} rather than true or false. ` +
+        `A branch fires its true arrow or its false arrow, so the condition has to be a comparison — ` +
+        `"${conditionStr} > 0" or similar, not a value.`
       );
     }
+
+    return String(result);
   }
 
   private async executeAggregateNode(
@@ -747,9 +765,4 @@ function edgeTaken(
 
 function defaultHandle(node: WorkflowNode): string | undefined {
   return node.type === 'human_gate' ? 'pass' : undefined;
-}
-
-function asText(value: unknown): string {
-  if (value === undefined || value === null) return '';
-  return typeof value === 'string' ? value : JSON.stringify(value);
 }

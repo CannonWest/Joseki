@@ -1,4 +1,5 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from './index';
+import { conditionParseError, conditionVariables, CONDITION_VOCABULARY } from './conditions';
 
 export interface WorkflowValidation {
   /** True when there are no errors. Warnings never make a workflow invalid. */
@@ -167,6 +168,8 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
         break;
       case 'branch':
         if (!config.condition) warnings.push(`Branch node "${node.id}" has no condition`);
+        else checkCondition(node.id, String(config.condition), nodeIds, warnings);
+        checkBranchArrows(node.id, validEdges, warnings);
         break;
       case 'human_gate':
         if (!validEdges.some((edge) => edge.source === node.id && edge.sourceHandle === 'fail')) {
@@ -183,6 +186,84 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
 
 function isReworkEdge(edge: WorkflowEdge, nodeById: Map<string, WorkflowNode>): boolean {
   return nodeById.get(edge.source)?.type === 'human_gate' && edge.sourceHandle === 'fail';
+}
+
+/** The names the executor puts in scope for every condition, whatever the graph. */
+const CONDITION_SCOPE: ReadonlySet<string> = new Set(['input', 'inputs', 'nodes']);
+
+/**
+ * A condition the author cannot run yet: it does not parse, or it reads a name
+ * nothing will supply.
+ *
+ * The second half is where a canvas-built workflow lands. Every id the canvas
+ * mints carries a hyphen, and a hyphen is subtraction — so `prompt-123 == "x"`
+ * parses as `prompt` minus `123` and looks for a variable called `prompt`.
+ * Catching it here is the difference between reading that at edit time and
+ * discovering it part-way through a paid run.
+ */
+function checkCondition(
+  nodeId: string,
+  condition: string,
+  nodeIds: Set<string>,
+  warnings: string[]
+): void {
+  const parseError = conditionParseError(condition);
+  if (parseError) {
+    warnings.push(`Branch node "${nodeId}" has a condition that does not parse: ${parseError}`);
+    return;
+  }
+  const unknown = conditionVariables(condition).filter(
+    (name) => !CONDITION_SCOPE.has(name) && !nodeIds.has(name) && !endsWithKnownNode(name, nodeIds)
+  );
+  for (const name of unknown) {
+    warnings.push(
+      `Branch node "${nodeId}" reads "${name}", which nothing supplies. ` +
+      `A condition can use input, inputs, nodes and the functions ` +
+      `${CONDITION_VOCABULARY.join(', ')}; reach a node whose id has a hyphen with ` +
+      `get(nodes, "the-id").`
+    );
+  }
+}
+
+/** The legacy flat form: a node's own id, or its id with `_output` appended. */
+function endsWithKnownNode(name: string, nodeIds: Set<string>): boolean {
+  return name.endsWith('_output') && nodeIds.has(name.slice(0, -'_output'.length));
+}
+
+/**
+ * A branch decides true or false, so those are the arrows it may have.
+ *
+ * A missing one is a path that ends at the branch, and an arrow on any other
+ * handle can never fire because nothing else is ever chosen. An arrow with no
+ * handle at all is the loud one: the executor takes an unhandled arrow
+ * whatever was decided, so a branch wired that way does not branch.
+ */
+function checkBranchArrows(nodeId: string, edges: WorkflowEdge[], warnings: string[]): void {
+  const out = edges.filter((edge) => edge.source === nodeId);
+  if (out.length === 0) return;
+  const handles = new Set<string>();
+  for (const edge of out) {
+    if (edge.sourceHandle) handles.add(edge.sourceHandle);
+    else {
+      warnings.push(
+        `Branch node "${nodeId}" has an arrow with no true/false handle ("${edge.id}"): ` +
+        `it fires whichever way the condition goes`
+      );
+    }
+  }
+  for (const expected of ['true', 'false']) {
+    if (!handles.has(expected)) {
+      warnings.push(`Branch node "${nodeId}" has no ${expected} arrow: that path ends here`);
+    }
+  }
+  for (const handle of handles) {
+    if (handle !== 'true' && handle !== 'false') {
+      warnings.push(
+        `Branch node "${nodeId}" has an arrow on "${handle}", which it can never choose: ` +
+        `a branch chooses true or false`
+      );
+    }
+  }
 }
 
 function checkTemplateRefs(
