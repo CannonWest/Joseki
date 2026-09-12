@@ -42,15 +42,23 @@ function modelLabel(model: ChatModel): string {
   return name;
 }
 
-/** How a tier reads where it is being chosen, and what it means underneath. */
+/**
+ * A tier goes by the gateway's name for it, not a description of it. `flex`
+ * and `priority` are the values `service_tier` takes and the names the
+ * provider roster tags its endpoints with (`openai/flex`), so the menu here
+ * and the roster under Routing say the same word about the same thing.
+ * OpenRouter also spells them `:floor` and `:nitro` as model suffixes, and
+ * OpenAI tags its priority endpoint `fast`; those are the same two tiers.
+ */
 const TIER_LABEL: Record<ServiceTier, string> = {
-  flex: 'cheaper, slower',
-  priority: 'faster, pricier'
+  flex: 'flex',
+  priority: 'priority'
 };
 
+/** What the name means, said once, under the menu rather than inside it. */
 const TIER_NOTE: Record<ServiceTier, string> = {
-  flex: 'A discounted tier the provider serves at lower priority. It never falls back to a standard endpoint, so a request is refused rather than quietly costing more.',
-  priority: 'Priority endpoints are tried first, at a premium, falling back to standard ones if none succeed.'
+  flex: 'flex — cheaper, served at lower priority. It never falls back to a standard endpoint, so a request is refused rather than quietly costing more. Spelled :floor as a model suffix.',
+  priority: 'priority — faster, at a premium. Priority endpoints are tried first, falling back to standard ones if none succeed. Spelled :nitro as a model suffix.'
 };
 
 /**
