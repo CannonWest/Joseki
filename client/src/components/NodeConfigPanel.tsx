@@ -1,6 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
+import { DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
+import { useChatStore } from '../stores/chatStore';
 
 interface NodeConfigPanelProps {
   node: Node;
@@ -35,6 +37,14 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   const [config, setConfig] = useState(node.data.config || {});
   const [label, setLabel] = useState(node.data.label);
   const [activeTab, setActiveTab] = useState<TabType>('config');
+
+  // Prompt nodes pick from the OpenRouter catalog the chat surface already
+  // loads; any slug can still be typed.
+  const catalog = useChatStore((state) => state.catalog);
+  const loadCatalog = useChatStore((state) => state.loadCatalog);
+  useEffect(() => {
+    if (node.type === 'prompt') void loadCatalog();
+  }, [node.type, loadCatalog]);
 
   const handleSave = () => {
     onUpdate({ label, config });
@@ -127,16 +137,24 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
               <label className="block text-xs font-medium text-slate-400 mb-1">
                 Model
               </label>
-              <select
-                value={config.model || 'gpt-4'}
+              <input
+                type="text"
+                list="joseki-workflow-models"
+                value={config.model ?? DEFAULT_WORKFLOW_MODEL}
                 onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
-              >
-                <option value="gpt-4">GPT-4</option>
-                <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                <option value="claude-3-opus">Claude 3 Opus</option>
-              </select>
+                placeholder={DEFAULT_WORKFLOW_MODEL}
+                spellCheck={false}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 font-mono"
+              />
+              <datalist id="joseki-workflow-models">
+                {catalog.map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </datalist>
+              <p className="text-xs text-slate-500 mt-1">
+                An OpenRouter model id, e.g. <code className="text-slate-400">openai/gpt-4o-mini</code>
+                {catalog.length ? ` — ${catalog.length} in the catalog` : ''}
+              </p>
             </div>
 
             <div>

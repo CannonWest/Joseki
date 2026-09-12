@@ -37,13 +37,16 @@ interface Call { model: string; systemPrompt: string; userPrompt: string }
 class StubLLM {
   calls: Call[] = [];
   failOn: string | null = null;
+  /** Cost the fake gateway reports; undefined means it reported none. */
+  cost: number | undefined = undefined;
   async generate(p: Call) {
     this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt });
     if (this.failOn && p.userPrompt.includes(this.failOn)) throw new Error(`model refused: ${this.failOn}`);
     return {
       content: `<${p.model}: ${p.userPrompt}>`,
       tokenUsage: { prompt: 1, completion: 1, total: 2 },
-      model: p.model
+      model: p.model,
+      cost: this.cost
     };
   }
 }
@@ -128,6 +131,17 @@ test('the output node passes its single input through', async () => {
   const ctx = await h.run();
   assert.equal(ctx.out.output, ctx.draft.output);
   assert.equal(ctx.out.output, '<gpt-4: Summarize: x>');
+});
+
+test('a prompt trace carries the gateway cost when reported, else the local price table', async () => {
+  const reported = harness(linear(), { inputs: { in: 'x' } });
+  reported.llm.cost = 0.00042;
+  assert.equal((await reported.run()).draft.trace.cost, 0.00042);
+
+  // gpt-4 is in the local table: 1 prompt token + 1 completion token.
+  const local = harness(linear(), { inputs: { in: 'x' } });
+  const ctx = await local.run();
+  assert.equal(ctx.draft.trace.cost, Number(((1 / 1000) * 0.03 + (1 / 1000) * 0.06).toFixed(6)));
 });
 
 test('a failed node stops the run and nothing after it runs', async () => {

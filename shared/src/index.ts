@@ -106,6 +106,9 @@ export interface HumanGateConfig {
 export const DEFAULT_GATE_TIMEOUT_SECONDS = 3600;
 export const DEFAULT_MAX_REVISIONS = 3;
 
+/** The model a new prompt node starts with — an OpenRouter slug, like every model id in a workflow. */
+export const DEFAULT_WORKFLOW_MODEL = 'openai/gpt-4o-mini';
+
 export type GateVerdict = 'pass' | 'fail';
 
 /** What the reviewer decided at a human gate. */
@@ -580,7 +583,7 @@ export function createDefaultWorkflow(): Workflow {
       config: {
         systemPrompt: 'You are a helpful assistant.',
         userPrompt: '{{input}}',
-        model: 'gpt-4',
+        model: DEFAULT_WORKFLOW_MODEL,
         temperature: 0.7,
         maxTokens: 2048
       } as PromptConfig

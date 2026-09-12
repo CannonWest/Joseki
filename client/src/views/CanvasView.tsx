@@ -44,7 +44,7 @@ import { OutputNode } from '../nodes/OutputNode';
 import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
 import { ModelCompareNode } from '../nodes/ModelCompareNode';
-import { validateWorkflow } from '@joseki/shared';
+import { validateWorkflow, DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
 const nodeTypes = {
@@ -408,7 +408,7 @@ function Flow({
             return {
               systemPrompt: 'You are a helpful assistant.',
               userPrompt: '{{input}}',
-              model: 'gpt-4',
+              model: DEFAULT_WORKFLOW_MODEL,
               temperature: 0.7,
               maxTokens: 2048
             };

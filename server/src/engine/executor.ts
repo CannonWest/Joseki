@@ -10,7 +10,7 @@ import type {
 import { calculateCost, DEFAULT_GATE_TIMEOUT_SECONDS, DEFAULT_MAX_REVISIONS } from '@joseki/shared';
 import Handlebars from 'handlebars';
 import { Parser as ExprParser } from 'expr-eval';
-import { LLMAdapter } from '../adapters/llm';
+import { LLMAdapter, type Generator } from '../adapters/llm';
 import { Database } from '../db/database';
 import { GateRegistry, gates as sharedGates } from './gates';
 
@@ -85,10 +85,10 @@ interface NodeResult {
 }
 
 export class WorkflowExecutor {
-  private llmAdapter: LLMAdapter;
+  private llmAdapter: Generator;
   private db: Database;
 
-  constructor(db: Database, llmAdapter?: LLMAdapter) {
+  constructor(db: Database, llmAdapter?: Generator) {
     this.llmAdapter = llmAdapter ?? new LLMAdapter();
     this.db = db;
   }
@@ -305,6 +305,7 @@ export class WorkflowExecutor {
       let output: any;
       let tokenUsage = { prompt: 0, completion: 0, total: 0 };
       let model: string | undefined;
+      let reportedCost: number | undefined;
       let selectedHandle: string | undefined;
       let decision: GateDecision | undefined;
 
@@ -319,6 +320,7 @@ export class WorkflowExecutor {
           output = promptResult.output;
           tokenUsage = promptResult.tokenUsage;
           model = promptResult.model;
+          reportedCost = promptResult.cost;
           break;
         }
 
@@ -360,9 +362,10 @@ export class WorkflowExecutor {
 
       const latencyMs = Date.now() - startTime;
 
-      // Calculate cost if token usage is available
-      let cost = 0;
-      if (model && tokenUsage.total > 0) {
+      // The gateway's own figure when it reports one; otherwise the local
+      // price table, for the few models it knows.
+      let cost = reportedCost ?? 0;
+      if (reportedCost === undefined && model && tokenUsage.total > 0) {
         // getModelConfig returns the pricing pair itself
         const pricing = this.getModelConfig(model);
         if (pricing) {
@@ -425,7 +428,7 @@ export class WorkflowExecutor {
     inputs: NodeInput[],
     context: ExecutionContext,
     onStreamToken?: (nodeId: string, token: string) => void
-  ): Promise<{ output: string; tokenUsage: any; model: string }> {
+  ): Promise<{ output: string; tokenUsage: any; model: string; cost?: number }> {
     const config = node.data.config as any;
 
     // Compile templates with context
@@ -448,7 +451,8 @@ export class WorkflowExecutor {
     return {
       output: result.content,
       tokenUsage: result.tokenUsage,
-      model: config.model
+      model: config.model,
+      cost: result.cost
     };
   }
 
