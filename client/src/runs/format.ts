@@ -1,4 +1,4 @@
-import type { ExecutionStatus, ExecutionSummary } from '@joseki/shared';
+import type { ExecutionStatus, ExecutionSummary, ExecutionTrace } from '@joseki/shared';
 
 /**
  * How long a run took. A run still going, or one the server never closed out,
@@ -57,10 +57,37 @@ export function statusTone(status: ExecutionStatus): string {
   }
 }
 
+/** What one node attempt reads like in the log, live or read back from history. */
+type LoggedTrace = Pick<ExecutionTrace, 'status' | 'error' | 'latencyMs'>;
+
+/**
+ * A node attempt's line in the log.
+ *
+ * A node that ended on its fallback value succeeded, but the failure it
+ * recovered from is the part worth reading — so the line says both, rather
+ * than reporting a clean success the run did not actually have.
+ */
+export function traceLine(nodeId: string, trace: LoggedTrace): string {
+  if (trace.status === 'skipped') return `${nodeId} skipped: its path was not taken`;
+  if (trace.status === 'error') return `${nodeId} failed: ${trace.error ?? 'no reason given'}`;
+  if (trace.error) return `${nodeId} carried on with its fallback after: ${trace.error}`;
+
+  const took = trace.latencyMs ? ` · ${(trace.latencyMs / 1000).toFixed(1)}s` : '';
+  return `${nodeId} — ${trace.status}${took}`;
+}
+
+/** The tone that line reads in. A recovery is neither a clean success nor a failure. */
+export function traceTone(trace: Pick<LoggedTrace, 'status' | 'error'>): 'info' | 'error' | 'success' {
+  if (trace.status === 'error') return 'error';
+  if (trace.status === 'success') return trace.error ? 'info' : 'success';
+  return 'info';
+}
+
 /**
  * The line under a run's heading: what it touched, and what it cost. A node
- * that ran more than once is worth saying out loud — it means a gate sent work
- * back — so attempts are named whenever they outnumber the nodes.
+ * that ran more than once is worth saying out loud — a gate sent work back, or
+ * the node failed and tried again — so attempts are named whenever they
+ * outnumber the nodes.
  */
 export function runShape(run: ExecutionSummary): string {
   const nodes = `${run.nodeCount} node${run.nodeCount === 1 ? '' : 's'}`;

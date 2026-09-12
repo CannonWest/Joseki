@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ExecutionDetail } from '@joseki/shared';
-import { runCost, runDuration, runShape, runWhen, statusTone } from '../src/runs/format';
+import { runCost, runDuration, runShape, runWhen, statusTone, traceLine, traceTone } from '../src/runs/format';
 import { logsFromRun, nodeStatesFromTraces } from '../src/stores/executionStore';
 
 function trace(nodeId: string, timestamp: number, overrides: Partial<ExecutionDetail['traces'][number]> = {}) {
@@ -106,6 +106,49 @@ test('a run that reworked a node says how many attempts it took', () => {
   assert.equal(
     runShape(detail({ traceCount: 1, nodeCount: 1, totalTokens: 0, totalCost: 0 })),
     '1 node · free'
+  );
+});
+
+test('a node that ended on its fallback says so, rather than reading as a clean success', () => {
+  const recovered = trace('draft', 10, { error: 'model refused: boom' });
+
+  assert.equal(traceLine('draft', recovered), 'draft carried on with its fallback after: model refused: boom');
+  assert.equal(traceTone(recovered), 'info', 'a recovery is not a clean success');
+
+  // The same node without the wobble reads the way it always did.
+  assert.equal(traceLine('draft', trace('draft', 10)), 'draft — success · 1.5s');
+  assert.equal(traceTone(trace('draft', 10)), 'success');
+});
+
+test('a failed attempt names its reason, and a skipped node says why it never ran', () => {
+  const failed = trace('draft', 10, { status: 'error', error: 'model refused: boom' });
+  assert.equal(traceLine('draft', failed), 'draft failed: model refused: boom');
+  assert.equal(traceTone(failed), 'error');
+
+  const silent = trace('draft', 10, { status: 'error', error: undefined });
+  assert.equal(traceLine('draft', silent), 'draft failed: no reason given');
+
+  const skipped = trace('unused', 10, { status: 'skipped' });
+  assert.equal(traceLine('unused', skipped), 'unused skipped: its path was not taken');
+  assert.equal(traceTone(skipped), 'info');
+});
+
+test('a retried node reads as its failures followed by the try that worked', () => {
+  const logs = logsFromRun(
+    detail({
+      traces: [
+        trace('draft', 10, { status: 'error', error: 'model refused: boom', latencyMs: 0 }),
+        trace('draft', 20)
+      ]
+    })
+  );
+
+  assert.deepEqual(
+    logs.slice(1, 3).map((l) => [l.message, l.type]),
+    [
+      ['draft failed: model refused: boom', 'error'],
+      ['draft — success · 1.5s', 'success']
+    ]
   );
 });
 

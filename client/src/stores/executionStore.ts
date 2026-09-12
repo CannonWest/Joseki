@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { traceLine, traceTone } from '../runs/format';
 import type {
   ExecutionDetail,
   ExecutionPausedEvent,
@@ -62,13 +63,10 @@ export function logsFromRun(run: ExecutionDetail): ExecutionState['logs'] {
   ];
 
   for (const trace of run.traces) {
-    const took = trace.latencyMs ? ` · ${(trace.latencyMs / 1000).toFixed(1)}s` : '';
     logs.push({
       timestamp: trace.timestamp,
-      message: trace.error
-        ? `${trace.nodeId} failed: ${trace.error}`
-        : `${trace.nodeId} — ${trace.status}${took}`,
-      type: trace.status === 'error' ? 'error' : 'info'
+      message: traceLine(trace.nodeId, trace),
+      type: traceTone(trace)
     });
   }
 

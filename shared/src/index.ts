@@ -63,11 +63,31 @@ export interface Workflow {
 
 // ==================== Node Config Types ====================
 
+/**
+ * What a node does when it fails.
+ *
+ * - `fail` — the node fails and the run stops there. What a node with no
+ *   strategy does, and what every node did before there were strategies.
+ * - `retry` — run it again, up to `maxAttempts` tries in all, waiting longer
+ *   before each one. Every attempt is recorded, so the history shows the
+ *   failures as well as the try that worked; if the last one still fails the
+ *   run stops, as `fail` would.
+ * - `default` — the node carries `fallbackValue` instead of failing and the
+ *   run goes on. The trace keeps the error, so the record still says what it
+ *   recovered from.
+ */
 export interface ErrorHandlerConfig {
   strategy: 'retry' | 'default' | 'fail';
-  maxAttempts?: number;       // for retry
-  fallbackValue?: any;        // for default
+  /** Tries in all, counting the first. Default DEFAULT_MAX_ATTEMPTS, capped at MAX_ATTEMPTS. */
+  maxAttempts?: number;
+  /** What the node carries when `default` salvages it. Unset carries null. */
+  fallbackValue?: any;
 }
+
+/** Tries a retrying node gets in all, counting the first. */
+export const DEFAULT_MAX_ATTEMPTS = 3;
+/** The most tries a node may be given, however high maxAttempts is set. */
+export const MAX_ATTEMPTS = 10;
 
 export interface PromptConfig {
   systemPrompt: string;

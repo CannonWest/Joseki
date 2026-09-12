@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ExecutionPausedEvent, ExecutionTrace, GateDecision } from '@joseki/shared';
+import { traceLine, traceTone } from '../runs/format';
 import { useExecutionStore } from '../stores/executionStore';
 
 export function useSocket() {
@@ -30,17 +31,15 @@ export function useSocket() {
 
     socket.on('execution:nodeStart', (data) => {
       setNodeStatus(data.nodeId, 'running');
-      addLog(`Node ${data.nodeId} started`, 'info');
+      addLog(`${data.nodeId} started`, 'info');
     });
 
+    // A node that failed and is about to try again reports the failure here,
+    // then starts over — so the log carries the whole attempt sequence, and
+    // reads the same as the one a reopened run is rebuilt from.
     socket.on('execution:nodeComplete', (data: { nodeId: string; trace: ExecutionTrace }) => {
-      const { status } = data.trace;
-      setNodeStatus(data.nodeId, status, data.trace);
-      if (status === 'skipped') {
-        addLog(`Node ${data.nodeId} skipped: its path was not taken`, 'info');
-      } else {
-        addLog(`Node ${data.nodeId} completed: ${status}`, status === 'success' ? 'success' : 'error');
-      }
+      setNodeStatus(data.nodeId, data.trace.status, data.trace);
+      addLog(traceLine(data.nodeId, data.trace), traceTone(data.trace));
     });
 
     socket.on('execution:token', (data) => {

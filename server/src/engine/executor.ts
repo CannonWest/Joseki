@@ -2,12 +2,19 @@ import type {
   Workflow,
   WorkflowNode,
   WorkflowEdge,
+  ErrorHandlerConfig,
   ExecutionContext,
   ExecutionTrace,
   ExecutionPausedEvent,
   GateDecision
 } from '@joseki/shared';
-import { calculateCost, DEFAULT_GATE_TIMEOUT_SECONDS, DEFAULT_MAX_REVISIONS } from '@joseki/shared';
+import {
+  calculateCost,
+  DEFAULT_GATE_TIMEOUT_SECONDS,
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_MAX_REVISIONS,
+  MAX_ATTEMPTS
+} from '@joseki/shared';
 import Handlebars from 'handlebars';
 import { Parser as ExprParser } from 'expr-eval';
 import { LLMAdapter, type Generator } from '../adapters/llm';
@@ -20,6 +27,48 @@ const safeExprParser = new ExprParser();
 // Prompts are model input, not HTML: a quote in an upstream summary must reach
 // the next model as a quote, not as &quot;.
 const TEMPLATE_OPTIONS = { noEscape: true };
+
+/** How long a retrying node waits before its next try, and the ceiling on it. */
+export const RETRY_BASE_DELAY_MS = 500;
+export const RETRY_MAX_DELAY_MS = 60_000;
+
+/**
+ * The pause after `attempt` failed: half a second, then a second, then two,
+ * doubling up to the ceiling. A model that just rate-limited is given room
+ * rather than hammered.
+ */
+export function retryDelayMs(attempt: number): number {
+  return Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
+}
+
+export type Sleep = (ms: number) => Promise<void>;
+
+const realSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface ErrorPolicy {
+  strategy: 'retry' | 'default' | 'fail';
+  maxAttempts: number;
+  fallbackValue: unknown;
+}
+
+/**
+ * What a node was told to do about failure. Read off the config whatever the
+ * node's type, so a node type that grows an error strategy gets one for free;
+ * a node that says nothing fails, which is how every node used to behave.
+ */
+function errorPolicy(node: WorkflowNode): ErrorPolicy {
+  const configured = (node.data.config as { onError?: ErrorHandlerConfig }).onError;
+  const strategy = configured?.strategy;
+  const asked = Number(configured?.maxAttempts);
+
+  return {
+    strategy: strategy === 'retry' || strategy === 'default' ? strategy : 'fail',
+    maxAttempts: Number.isFinite(asked)
+      ? Math.min(Math.max(Math.trunc(asked), 1), MAX_ATTEMPTS)
+      : DEFAULT_MAX_ATTEMPTS,
+    fallbackValue: configured?.fallbackValue ?? null
+  };
+}
 
 export interface ExecutionOptions {
   startNodeId?: string;
@@ -87,10 +136,12 @@ interface NodeResult {
 export class WorkflowExecutor {
   private llmAdapter: Generator;
   private db: Database;
+  private sleep: Sleep;
 
-  constructor(db: Database, llmAdapter?: Generator) {
+  constructor(db: Database, llmAdapter?: Generator, sleep: Sleep = realSleep) {
     this.llmAdapter = llmAdapter ?? new LLMAdapter();
     this.db = db;
+    this.sleep = sleep;
   }
 
   /**
@@ -107,6 +158,9 @@ export class WorkflowExecutor {
    * — is a trigger, not a dependency: its target never waits on it and is
    * not fed by it. When it fires, the target and everything downstream of
    * it are re-run, up to the gate's maxRevisions.
+   *
+   * A node that fails does what its error strategy says: stop the run, try
+   * again, or carry a fallback value and go on. See `runNode`.
    */
   async execute(
     workflow: Workflow,
@@ -224,22 +278,25 @@ export class WorkflowExecutor {
         continue;
       }
 
-      options.onNodeStart?.(nodeId);
-
       const inputs: NodeInput[] = takenEdges.map(e => ({
         nodeId: e.source,
         output: context[e.source]?.output
       }));
       const run: RunState = { executionId, revision: revisions.get(nodeId) ?? 0 };
-      const { trace, selectedHandle, decision } = await this.executeNode(node, inputs, context, run, options);
+      // A retrying node records the attempts it gave up on as it goes; the
+      // attempt it ended on is recorded below, with the rest of the run.
+      const record = (attempt: ExecutionTrace) => {
+        this.db.createExecutionTrace({ ...attempt, executionId, nodeId });
+        options.onNodeComplete?.(nodeId, attempt);
+      };
+      const { trace, selectedHandle, decision } = await this.runNode(node, inputs, context, run, options, record);
 
       context[nodeId] = decision ? { output: trace.output, trace, decision } : { output: trace.output, trace };
-      this.db.createExecutionTrace({ ...trace, executionId, nodeId });
-      options.onNodeComplete?.(nodeId, trace);
+      record(trace);
 
-      // There is no error handling yet, so an arrow out of a failed node has
-      // nothing meaningful to carry. Stop here rather than run the rest of
-      // the graph on a null.
+      // Still failed, so its error strategy is spent — it had no strategy, or
+      // it ran out of tries. An arrow out of it has nothing meaningful to
+      // carry, so stop here rather than run the rest of the graph on a null.
       if (trace.status === 'error') {
         throw new NodeFailedError(nodeId, context, `Node "${node.data.label}" (${nodeId}) failed: ${trace.error}`);
       }
@@ -289,6 +346,47 @@ export class WorkflowExecutor {
       latencyMs: 0,
       status: 'skipped'
     };
+  }
+
+  /**
+   * Runs one node and then does what its error strategy says.
+   *
+   * A retrying node tries again after a growing pause, and every attempt it
+   * gave up on goes through `record` — so the log shows the failures as well
+   * as the try that worked, and the run history counts them. A node that
+   * falls back carries its fallback value and the run goes on, with the
+   * error left on the trace so the record still says what it recovered from.
+   * A node that says nothing about failure fails, and the run stops there.
+   */
+  private async runNode(
+    node: WorkflowNode,
+    inputs: NodeInput[],
+    context: ExecutionContext,
+    run: RunState,
+    options: ExecutionOptions,
+    record: (trace: ExecutionTrace) => void
+  ): Promise<NodeResult> {
+    const policy = errorPolicy(node);
+    const tries = policy.strategy === 'retry' ? policy.maxAttempts : 1;
+    let result!: NodeResult;
+
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      if (attempt > 1) {
+        record(result.trace);
+        await this.sleep(retryDelayMs(attempt - 1));
+      }
+      options.onNodeStart?.(node.id);
+      result = await this.executeNode(node, inputs, context, run, options);
+      if (result.trace.status !== 'error') return result;
+    }
+
+    if (policy.strategy === 'default') {
+      return {
+        ...result,
+        trace: { ...result.trace, status: 'success', output: policy.fallbackValue }
+      };
+    }
+    return result;
   }
 
   private async executeNode(

@@ -147,6 +147,12 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
       warnings.push(`Node "${node.id}" is not connected to anything`);
     }
     const config = (node.data?.config ?? {}) as Record<string, unknown>;
+    // A node told to fall back on error with nothing to fall back to carries
+    // null into everything downstream, which is almost never the intent.
+    const onError = config.onError as Record<string, unknown> | undefined;
+    if (onError?.strategy === 'default' && onError.fallbackValue === undefined) {
+      warnings.push(`Node "${node.id}" falls back on error but has no fallback value: it would carry nothing`);
+    }
     switch (node.type) {
       case 'prompt':
         if (!config.model) warnings.push(`Prompt node "${node.id}" has no model`);

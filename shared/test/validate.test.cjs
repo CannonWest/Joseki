@@ -96,6 +96,28 @@ test('a disconnected node, a missing model, and missing input/output all warn', 
   assert.ok(warnings.includes('Workflow has no output node'));
 });
 
+test('falling back on error with nothing to fall back to warns', () => {
+  const wf = linear();
+  wf.nodes.find((n) => n.id === 'draft').data.config.onError = { strategy: 'default' };
+  const result = validateWorkflow(wf);
+
+  assert.equal(result.valid, true, 'a warning never makes a workflow unrunnable');
+  assert.ok(result.warnings.some((w) => w.includes('no fallback value')));
+});
+
+test('a fallback value, or any other strategy, is nothing to warn about', () => {
+  const withValue = linear();
+  withValue.nodes.find((n) => n.id === 'draft').data.config.onError = {
+    strategy: 'default',
+    fallbackValue: '',
+  };
+  assert.deepEqual(validateWorkflow(withValue).warnings, [], 'an empty string is still a value');
+
+  const retrying = linear();
+  retrying.nodes.find((n) => n.id === 'draft').data.config.onError = { strategy: 'retry' };
+  assert.deepEqual(validateWorkflow(retrying).warnings, []);
+});
+
 test('structure check rejects non-objects and malformed nodes', () => {
   assert.equal(validateWorkflowStructure('nope').ok, false);
   assert.equal(validateWorkflowStructure({ nodes: 'x', edges: [] }).ok, false);

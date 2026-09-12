@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Node, Edge } from 'reactflow';
 import Editor from '@monaco-editor/react';
-import { DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_WORKFLOW_MODEL, MAX_ATTEMPTS } from '@joseki/shared';
 import type { OutputFormat } from '@joseki/shared';
 import { useChatStore } from '../stores/chatStore';
 import { useExecutionStore } from '../stores/executionStore';
@@ -217,19 +217,44 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
             {config.onError?.strategy === 'retry' && (
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">
-                  Max Retry Attempts
+                  Max Attempts
                 </label>
                 <input
                   type="number"
                   min="1"
-                  max="10"
-                  value={config.onError?.maxAttempts || 3}
+                  max={MAX_ATTEMPTS}
+                  value={config.onError?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}
                   onChange={(e) => setConfig({
                     ...config,
                     onError: { ...config.onError, maxAttempts: parseInt(e.target.value) }
                   })}
                   className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Tries in all, counting the first. Each retry waits longer than the last.
+                </p>
+              </div>
+            )}
+
+            {config.onError?.strategy === 'default' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Fallback Value
+                </label>
+                <textarea
+                  rows={2}
+                  value={config.onError?.fallbackValue ?? ''}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    onError: { ...config.onError, fallbackValue: e.target.value }
+                  })}
+                  placeholder="What this node carries when it fails"
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 resize-y"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  The run goes on with this instead of stopping. Leave it empty and the
+                  node carries nothing.
+                </p>
               </div>
             )}
 

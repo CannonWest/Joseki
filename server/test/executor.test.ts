@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createExampleWorkflow } from '@joseki/shared';
+import { createExampleWorkflow, MAX_ATTEMPTS } from '@joseki/shared';
 import type {
   Workflow,
   WorkflowNode,
@@ -37,11 +37,21 @@ interface Call { model: string; systemPrompt: string; userPrompt: string }
 class StubLLM {
   calls: Call[] = [];
   failOn: string | null = null;
+  /** Refusals before it relents; null refuses every time. */
+  failTimes: number | null = null;
+  private refusals = 0;
   /** Cost the fake gateway reports; undefined means it reported none. */
   cost: number | undefined = undefined;
   async generate(p: Call) {
     this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt });
-    if (this.failOn && p.userPrompt.includes(this.failOn)) throw new Error(`model refused: ${this.failOn}`);
+    const refusing =
+      this.failOn !== null &&
+      p.userPrompt.includes(this.failOn) &&
+      (this.failTimes === null || this.refusals < this.failTimes);
+    if (refusing) {
+      this.refusals++;
+      throw new Error(`model refused: ${this.failOn}`);
+    }
     return {
       content: `<${p.model}: ${p.userPrompt}>`,
       tokenUsage: { prompt: 1, completion: 1, total: 2 },
@@ -63,7 +73,11 @@ function harness(wf: Workflow, options: ExecutionOptions = {}, decide?: Decide) 
 
   const llm = new StubLLM();
   const gates = new GateRegistry();
-  const executor = new WorkflowExecutor(db, llm as any);
+  // Retries wait in real life; here the wait is only written down.
+  const waits: number[] = [];
+  const executor = new WorkflowExecutor(db, llm as any, async (ms) => {
+    waits.push(ms);
+  });
   const started: string[] = [];
   const completed: Array<{ nodeId: string; status: ExecutionTrace['status'] }> = [];
   const paused: ExecutionPausedEvent[] = [];
@@ -83,7 +97,7 @@ function harness(wf: Workflow, options: ExecutionOptions = {}, decide?: Decide) 
       }
     });
 
-  return { db, llm, gates, run, started, completed, paused };
+  return { db, llm, gates, run, started, completed, paused, waits };
 }
 
 const pass: Decide = () => ({ verdict: 'pass' });
@@ -150,6 +164,96 @@ test('a failed node stops the run and nothing after it runs', async () => {
   await assert.rejects(h.run(), /Node "draft" \(draft\) failed: model refused: boom/);
   assert.deepEqual(h.completed.map((c) => c.status), ['success', 'error']);
   assert.ok(!h.started.includes('out'));
+});
+
+// ---- what a node does about failure: the onError strategies ----
+
+/** in → draft → out, where draft is told what to do when the model refuses. */
+const onError = (config: Record<string, unknown>) => {
+  const wf = linear();
+  const draft = wf.nodes.find((n) => n.id === 'draft')!;
+  (draft.data.config as any).onError = config;
+  return wf;
+};
+
+test('a retrying node tries again, and the run carries on with the try that worked', async () => {
+  const h = harness(onError({ strategy: 'retry' }), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+  h.llm.failTimes = 1;
+
+  const ctx = await h.run();
+
+  assert.equal(ctx.draft.trace.status, 'success');
+  assert.equal(ctx.out.output, '<gpt-4: Summarize: boom>');
+  // The failure is in the story rather than swallowed, and the node announced
+  // itself again so the canvas shows it running a second time.
+  assert.deepEqual(h.completed.map((c) => c.status), ['success', 'error', 'success', 'success']);
+  assert.deepEqual(h.started, ['in', 'draft', 'draft', 'out']);
+  assert.deepEqual(h.waits, [500]);
+});
+
+test('every attempt is recorded, so the history shows the failures as well', async () => {
+  const h = harness(onError({ strategy: 'retry' }), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+  h.llm.failTimes = 2;
+  await h.run();
+
+  const attempts = h.db.getExecutionTraces('run').filter((t) => t.nodeId === 'draft');
+  assert.deepEqual(attempts.map((t) => t.status), ['error', 'error', 'success']);
+  assert.match(attempts[0].error ?? '', /model refused/);
+  // Each pause is longer than the one before it.
+  assert.deepEqual(h.waits, [500, 1000]);
+});
+
+test('a retrying node that never works fails the run, after the tries it was given', async () => {
+  const h = harness(onError({ strategy: 'retry', maxAttempts: 2 }), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+
+  await assert.rejects(h.run(), /Node "draft" \(draft\) failed: model refused: boom/);
+  assert.equal(h.llm.calls.length, 2);
+  assert.ok(!h.started.includes('out'));
+});
+
+test('however many tries a node asks for, it gets at most MAX_ATTEMPTS', async () => {
+  const h = harness(onError({ strategy: 'retry', maxAttempts: 99 }), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+
+  await assert.rejects(h.run(), /model refused/);
+  assert.equal(h.llm.calls.length, MAX_ATTEMPTS);
+});
+
+test('a node that falls back carries its fallback value, and the run goes on', async () => {
+  const h = harness(
+    onError({ strategy: 'default', fallbackValue: 'nothing to summarize' }),
+    { inputs: { in: 'boom' } }
+  );
+  h.llm.failOn = 'boom';
+
+  const ctx = await h.run();
+
+  assert.equal(ctx.draft.output, 'nothing to summarize');
+  assert.equal(ctx.out.output, 'nothing to summarize');
+  assert.equal(h.llm.calls.length, 1, 'a fallback is not a retry');
+  // It succeeded, and the trace still says what it recovered from.
+  assert.equal(ctx.draft.trace.status, 'success');
+  assert.match(ctx.draft.trace.error ?? '', /model refused: boom/);
+});
+
+test('a fallback with nothing to fall back to carries null', async () => {
+  const h = harness(onError({ strategy: 'default' }), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+
+  const ctx = await h.run();
+  assert.equal(ctx.draft.output, null);
+});
+
+test('a node with no strategy still stops the run, and never waits', async () => {
+  const h = harness(linear(), { inputs: { in: 'boom' } });
+  h.llm.failOn = 'boom';
+
+  await assert.rejects(h.run(), /model refused/);
+  assert.equal(h.llm.calls.length, 1);
+  assert.deepEqual(h.waits, []);
 });
 
 // in → branch ─true──→ yes ─┐

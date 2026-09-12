@@ -82,6 +82,20 @@ joseki/
 | `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
 | `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
 
+## When a node fails
+
+A prompt node can say what should happen when the model refuses, times out or errors — **On Error** in its config panel:
+
+| Strategy | What happens |
+|----------|--------------|
+| **Fail** | The node fails and the run stops there. What a node with no strategy does, and what every node did before there were strategies |
+| **Retry** | Run it again, up to **Max Attempts** tries in all — counting the first, capped at 10 — waiting half a second, then a second, then two between them. If the last try still fails the run stops, as **Fail** would |
+| **Default** | The node carries its **Fallback Value** instead of failing, and the run goes on |
+
+Every attempt is recorded, so a node that retried shows its failures as well as the try that worked: the log reads the sequence, and the runs list counts the extra attempts the same way it counts a gate's rework.
+
+A node salvaged by **Default** ends as a success — that is what lets the run carry on — but its trace keeps the error, so the log says `draft carried on with its fallback after: …` rather than reporting a clean success the run did not have. **Validate** warns about a node set to fall back with nothing to fall back to, since it would carry nothing into everything downstream.
+
 ## Run history
 
 Every run is recorded as it happens: one row for the run, one trace per node — its input, its output, tokens, cost, latency and outcome. **Runs** in the toolbar lists the past runs of the workflow on the canvas, newest first, with what each one touched and what it cost.
