@@ -83,6 +83,14 @@ joseki/
 | `/api/workflows/:id/validate` | POST | `{ valid, errors, warnings }` for the stored workflow |
 | `/api/workflows/:id` | PUT | Update — creates the workflow if the id is new |
 
+### What a model will read and write
+
+A model publishes two ceilings and no floor: `context_length`, the budget input and output **share**, and `max_completion_tokens`, the most it will emit. There is no minimum — the only field in the catalog with "min" in its name is a pricing threshold, not a limit on what you may send.
+
+The two are not proportional. 29 of 445 models cap output below 5% of their window, and `writer/palmyra-x5` will read 1,040,000 tokens while emitting 8,192. So a prompt node shows both under its model (`128k ctx · 16k out`) and says so when **Max Tokens** exceeds what the model will emit — a request the gateway refuses, which is late to learn it.
+
+Providers serving one model need not agree on either, and the figure on the model is only the top provider's: `meta-llama/llama-3.1-8b-instruct` advertises 131k, while `novita` serves 16k of it and `cloudflare` 32k. Pinning a provider under **Routing** can therefore shrink the window under you, so every row in the roster carries its own ceilings and the short ones are called out.
+
 ### Models this app does not offer
 
 OpenRouter publishes a `:batch` variant of many models — around half price, served only through its asynchronous Batch API (`POST /api/beta/batches`, results inside a 24-hour window). A chat completion to one is refused:

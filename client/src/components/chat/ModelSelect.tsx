@@ -169,8 +169,9 @@ export function ModelSelect({ value, onChange, tier, onTierChange }: ModelSelect
         {selected ? (
           <>
             <span className="font-mono text-slate-400">{selected.id}</span> ·{' '}
-            {formatContext(selected.contextLength)} ctx · {formatPerMillion(selected.pricing.prompt)} /{' '}
-            {formatPerMillion(selected.pricing.completion)} per M
+            {formatContext(selected.contextLength)} ctx
+            {selected.maxCompletionTokens ? ` · ${formatContext(selected.maxCompletionTokens)} out` : ''} ·{' '}
+            {formatPerMillion(selected.pricing.prompt)} / {formatPerMillion(selected.pricing.completion)} per M
           </>
         ) : catalog.length ? (
           <span className="text-amber-400/80">

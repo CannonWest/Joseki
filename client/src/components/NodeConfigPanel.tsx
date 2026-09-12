@@ -9,6 +9,7 @@ import { useWorkflowStore } from '../stores/workflowStore';
 import { OutputResult } from './OutputResult';
 import { OUTPUT_FORMATS } from '../output/format';
 import { ModelSelect } from './chat/ModelSelect';
+import { maxTokensWarning } from './chat/format';
 import { RoutingSection } from './chat/settings/RoutingSection';
 import { SamplingSection } from './chat/settings/SamplingSection';
 import { ReasoningSection } from './chat/settings/ReasoningSection';
@@ -67,6 +68,7 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
   // They read a params bag and speak in merge patches; the node shows them its
   // config as one and applies each patch to itself.
   const sectionParams = useMemo(() => sectionParamsOf(config), [config]);
+  const maxTokensOver = maxTokensWarning(config.maxTokens, catalogModel);
   const patchSections = (patch: ChatParamsPatch) => setConfig(patchPromptConfig(config, patch));
 
   const handleSave = () => {
@@ -184,10 +186,13 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
               </label>
               <input
                 type="number"
+                min={1}
+                max={catalogModel?.maxCompletionTokens}
                 value={config.maxTokens || 2048}
                 onChange={(e) => setConfig({ ...config, maxTokens: parseInt(e.target.value) })}
                 className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200"
               />
+              {maxTokensOver && <p className="mt-1 text-xs text-amber-400/80">{maxTokensOver}</p>}
             </div>
 
             {/* Error Handling */}

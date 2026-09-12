@@ -9,7 +9,7 @@ import type {
   Quantization
 } from '@joseki/shared';
 import { useChatStore } from '../../../stores/chatStore';
-import { formatPerMillion } from '../format';
+import { formatContext, formatPerMillion } from '../format';
 import { ModelPicker } from '../ModelPicker';
 import { SettingsSection } from './SettingsSection';
 import { Chip, Label, NumberField, SelectField, Toggle, countSet } from './fields';
@@ -138,21 +138,46 @@ export function RoutingSection({ params, modelId, model, onChange }: RoutingSect
     );
   };
 
-  const renderEndpoint = (endpoint: ModelEndpoint) => (
-    <div key={endpoint.providerSlug} className="py-1.5 border-b border-slate-800/60 last:border-0">
-      <div className="flex items-center gap-1">
-        <span className="flex-1 min-w-0 truncate text-sm text-slate-200" title={endpoint.name}>
-          {endpoint.providerSlug}
-        </span>
-        {renderPicks(endpoint.providerSlug)}
+  // Providers serving one model do not have to agree on its limits, and the
+  // figure on the model itself is only the top provider's — llama-3.1-8b
+  // advertises 131k while some of its endpoints serve 16k. Pinning a provider
+  // can therefore shrink the window under you, so each row says its own.
+  const renderEndpoint = (endpoint: ModelEndpoint) => {
+    const short =
+      endpoint.contextLength !== undefined &&
+      model?.contextLength !== undefined &&
+      endpoint.contextLength < model.contextLength;
+
+    return (
+      <div key={endpoint.providerSlug} className="py-1.5 border-b border-slate-800/60 last:border-0">
+        <div className="flex items-center gap-1">
+          <span className="flex-1 min-w-0 truncate text-sm text-slate-200" title={endpoint.name}>
+            {endpoint.providerSlug}
+          </span>
+          {renderPicks(endpoint.providerSlug)}
+        </div>
+        <div className="text-[11px] text-slate-500 truncate">
+          {formatPerMillion(endpoint.pricing.prompt)} / {formatPerMillion(endpoint.pricing.completion)} per M ·{' '}
+          {endpoint.quantization ?? '—'} · {uptime(endpoint.uptimeLast30m)} · {throughput(endpoint.throughputLast30m)}
+          {endpoint.status !== undefined && endpoint.status !== 0 ? ' · degraded' : ''}
+        </div>
+        <div className="text-[11px] text-slate-500 truncate">
+          <span
+            className={short ? 'text-amber-400/80' : undefined}
+            title={
+              short
+                ? `This model advertises ${formatContext(model?.contextLength)} of context; this provider serves ${formatContext(endpoint.contextLength)}.`
+                : undefined
+            }
+          >
+            {formatContext(endpoint.contextLength)} ctx
+          </span>
+          {endpoint.maxCompletionTokens ? ` · ${formatContext(endpoint.maxCompletionTokens)} out` : ''}
+          {endpoint.maxPromptTokens ? ` · ${formatContext(endpoint.maxPromptTokens)} in` : ''}
+        </div>
       </div>
-      <div className="text-[11px] text-slate-500 truncate">
-        {formatPerMillion(endpoint.pricing.prompt)} / {formatPerMillion(endpoint.pricing.completion)} per M ·{' '}
-        {endpoint.quantization ?? '—'} · {uptime(endpoint.uptimeLast30m)} · {throughput(endpoint.throughputLast30m)}
-        {endpoint.status !== undefined && endpoint.status !== 0 ? ' · degraded' : ''}
-      </div>
-    </div>
-  );
+    );
+  };
 
   const rosterLine =
     rosterStatus === 'loading'

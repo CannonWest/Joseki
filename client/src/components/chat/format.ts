@@ -76,6 +76,26 @@ export function formatLatency(ms: number | undefined): string | null {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
+/**
+ * What to say about a max-tokens setting the model will not honour.
+ *
+ * Context and output come out of one budget, and a model publishes a ceiling
+ * on the output half — often a small fraction of the window: a million tokens
+ * of context and eight thousand out is a real combination. Asking for more
+ * than the ceiling is refused at the gateway, which is late to find out.
+ * Null when there is nothing to say: no setting, no catalog record, or a
+ * model that publishes no ceiling (the openrouter/* routers do not, since
+ * they resolve to some other model).
+ */
+export function maxTokensWarning(
+  maxTokens: number | undefined,
+  model: Pick<ChatModel, 'maxCompletionTokens' | 'contextLength'> | undefined
+): string | null {
+  const cap = model?.maxCompletionTokens;
+  if (!maxTokens || !cap || maxTokens <= cap) return null;
+  return `This model emits at most ${formatContext(cap)} tokens — asking for ${formatContext(maxTokens)} will be refused.`;
+}
+
 export function formatContext(tokens: number | undefined): string {
   if (!tokens) return '—';
   return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
