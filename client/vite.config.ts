@@ -9,7 +9,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       // Resolve the shared workspace package to its TypeScript source
       // so Vite processes it through its transform pipeline
-      '@maestroai/shared': path.resolve(__dirname, '../shared/src/index.ts')
+      '@joseki/shared': path.resolve(__dirname, '../shared/src/index.ts')
     }
   },
   server: {
@@ -30,6 +30,6 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['@maestroai/shared']
+    include: ['@joseki/shared']
   }
 });

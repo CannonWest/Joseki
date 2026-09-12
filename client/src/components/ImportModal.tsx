@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Workflow, WorkflowValidation } from '@maestroai/shared';
+import type { Workflow, WorkflowValidation } from '@joseki/shared';
 import { useWorkflowStore } from '../stores/workflowStore';
 
 interface ImportModalProps {
@@ -60,7 +60,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
 
         <div className="p-4 space-y-3">
           <label className="block">
-            <span className="text-xs text-slate-400">Choose a file exported from MaestroAI</span>
+            <span className="text-xs text-slate-400">Choose a file exported from Joseki</span>
             <input
               type="file"
               accept=".json,application/json"

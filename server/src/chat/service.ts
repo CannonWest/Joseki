@@ -11,8 +11,8 @@ import type {
   ChatToolEndEvent,
   ChatToolStartEvent,
   Conversation
-} from '@maestroai/shared';
-import { generateId, mergePatch } from '@maestroai/shared';
+} from '@joseki/shared';
+import { generateId, mergePatch } from '@joseki/shared';
 import { Database } from '../db/database';
 import {
   DEFAULT_CHAT_MODEL,

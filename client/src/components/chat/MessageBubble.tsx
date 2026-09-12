@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { ChatMessage, ChatModel } from '@maestroai/shared';
+import type { ChatMessage, ChatModel } from '@joseki/shared';
 import { useChatStore, type StreamingReply } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
 import { estimateCost, formatCost, formatLatency, formatTokens, shortModel } from './format';

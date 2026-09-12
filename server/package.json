@@ -1,5 +1,5 @@
 {
-  "name": "@maestroai/server",
+  "name": "@joseki/server",
   "version": "1.0.0",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -14,7 +14,7 @@
     "probe:reasoning": "tsx scripts/reasoning-probe.ts"
   },
   "dependencies": {
-    "@maestroai/shared": "file:../shared",
+    "@joseki/shared": "file:../shared",
     "better-sqlite3": "^12.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

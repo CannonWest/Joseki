@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import type { ChatSendRequest } from '@maestroai/shared';
+import type { ChatSendRequest } from '@joseki/shared';
 import { ChatService } from '../chat/service';
 
 const room = (conversationId: string) => `conversation:${conversationId}`;

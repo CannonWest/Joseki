@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import type { ChatParams } from '@maestroai/shared';
-import { mergePatch } from '@maestroai/shared';
+import type { ChatParams } from '@joseki/shared';
+import { mergePatch } from '@joseki/shared';
 import { ChatService } from '../chat/service';
 import { Database, ConversationPatch } from '../db/database';
 

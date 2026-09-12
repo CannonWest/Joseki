@@ -1,5 +1,5 @@
 {
-  "name": "@maestroai/client",
+  "name": "@joseki/client",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "lint": "eslint . --ext ts,tsx"
   },
   "dependencies": {
-    "@maestroai/shared": "file:../shared",
+    "@joseki/shared": "file:../shared",
     "@monaco-editor/react": "^4.6.0",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",

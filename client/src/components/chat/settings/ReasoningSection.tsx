@@ -1,4 +1,4 @@
-import type { ChatModel, ChatParamsPatch, Conversation, ReasoningEffort } from '@maestroai/shared';
+import type { ChatModel, ChatParamsPatch, Conversation, ReasoningEffort } from '@joseki/shared';
 import { SettingsSection } from './SettingsSection';
 import { NumberField, SelectField, Toggle, countSet } from './fields';
 

@@ -7,7 +7,7 @@ import type {
   ModelEndpoint,
   OpenRouterRouting,
   Quantization
-} from '@maestroai/shared';
+} from '@joseki/shared';
 import { useChatStore } from '../../../stores/chatStore';
 import { formatPerMillion } from '../format';
 import { ModelPicker } from '../ModelPicker';

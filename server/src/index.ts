@@ -40,7 +40,7 @@ const io = new Server(httpServer, {
 });
 
 // Initialize database
-const db = new Database(process.env.DATABASE_PATH || './data/maestroai.db');
+const db = new Database(process.env.DATABASE_PATH || './data/joseki.db');
 
 // Chat runs through OpenRouter. Without a key the workflow side is unaffected
 // and the chat routes answer 503.
@@ -85,7 +85,7 @@ setupChatHandlers(io, chat);
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`MaestroAI server running on port ${PORT}`);
+  console.log(`Joseki server running on port ${PORT}`);
 });
 
 export { db, io };

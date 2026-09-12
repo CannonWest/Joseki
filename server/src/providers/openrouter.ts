@@ -12,7 +12,7 @@ import type {
   OpenRouterRouting,
   OpenRouterSampling,
   ReasoningEffort
-} from '@maestroai/shared';
+} from '@joseki/shared';
 import { accumulateToolCallDeltas, finalizeToolCallDeltas } from './toolCalls';
 
 /**
@@ -136,7 +136,7 @@ export class OpenRouterProvider {
     this.baseURL = (options.baseURL || OPENROUTER_BASE_URL).replace(/\/+$/, '');
     this.headers = {
       'HTTP-Referer': options.referer || 'http://localhost:5173',
-      'X-OpenRouter-Title': options.title || 'MaestroAI'
+      'X-OpenRouter-Title': options.title || 'Joseki'
     };
     this.client =
       options.client ??

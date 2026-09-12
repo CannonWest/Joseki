@@ -4,7 +4,7 @@
  * Demonstrates a realistic AI orchestration with 6 node types:
  * Input → Prompt (Draft) → Branch (Quality) → Prompt (Revision) → Aggregate → Human Gate → Output
  *
- * Users can load this from the welcome screen to explore MaestroAI's capabilities.
+ * Users can load this from the welcome screen to explore Joseki's capabilities.
  */
 
 import type {

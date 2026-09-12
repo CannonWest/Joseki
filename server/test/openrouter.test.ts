@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
+import type { ChatMessage, ChatToolCall } from '@joseki/shared';
 import {
   OpenRouterProvider,
   applyModelCapabilities,

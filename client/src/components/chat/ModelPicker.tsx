@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ChatModel } from '@maestroai/shared';
+import type { ChatModel } from '@joseki/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { formatContext, formatPerMillion } from './format';
 

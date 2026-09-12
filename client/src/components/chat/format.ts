@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatModel, ChatTokenUsage } from '@maestroai/shared';
+import type { ChatMessage, ChatModel, ChatTokenUsage } from '@joseki/shared';
 
 /** `openai/gpt-4o-mini` → `gpt-4o-mini` */
 export function shortModel(id: string): string {

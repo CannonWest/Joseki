@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateId, validateWorkflow } from '@maestroai/shared';
+import { generateId, validateWorkflow } from '@joseki/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
 

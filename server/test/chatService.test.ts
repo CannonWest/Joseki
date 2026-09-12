@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChatModel, ChatParams, ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
+import type { ChatModel, ChatParams, ChatTokenUsage, ChatToolCall } from '@joseki/shared';
 import { Database } from '../src/db/database';
 import {
   ChatError,

@@ -1,4 +1,4 @@
-import type { WorkflowValidation } from '@maestroai/shared';
+import type { WorkflowValidation } from '@joseki/shared';
 
 interface ValidationPanelProps {
   result: WorkflowValidation;

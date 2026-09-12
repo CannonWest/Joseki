@@ -1,4 +1,4 @@
-# MaestroAI
+# Joseki
 
 A visual IDE for building conversational AI workflows with tree-based branching and multi-model evaluation.
 
@@ -15,15 +15,15 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 
 ```bash
 # Clone the repository
-git clone https://github.com/CannonWest/MaestroAI.git
-cd MaestroAI
+git clone https://github.com/CannonWest/Joseki.git
+cd Joseki
 
 # Install dependencies
 npm run install:all
 
-# Setup environment
-cp .env.example .env
-# Edit .env with your API keys
+# Setup environment — note this goes in server/, not the repo root
+cp server/.env.example server/.env
+# Edit server/.env with your API keys
 
 # Initialize database
 npm run db:init
@@ -36,17 +36,15 @@ The app will be available at:
 - Frontend: http://localhost:5173
 - Backend: http://localhost:3001
 
-After adding a **runtime** export to `shared`, restart the client dev server with its dependency cache cleared (`rm -rf client/node_modules/.vite`): Vite pre-bundles `@maestroai/shared` once at startup, so the page otherwise loads the stale bundle and renders blank with `does not provide an export named …` — while `tsc` still passes against the rebuilt `shared/dist`. Type-only additions need no restart.
+After adding a **runtime** export to `shared`, restart the client dev server with its dependency cache cleared (`rm -rf client/node_modules/.vite`): Vite pre-bundles `@joseki/shared` once at startup, so the page otherwise loads the stale bundle and renders blank with `does not provide an export named …` — while `tsc` still passes against the rebuilt `shared/dist`. Type-only additions need no restart.
 
 ## Project Structure
 
 ```
-maestroai/
+joseki/
 ├── client/          # React frontend (Vite + TypeScript + Tailwind)
 ├── server/          # Node.js backend (Express + Socket.io)
 ├── shared/          # Shared types and utilities
-├── LICENSE          # Apache 2.0 License
-├── NOTICE           # Attribution notices
 └── README.md        # This file
 ```
 
@@ -61,7 +59,7 @@ maestroai/
 
 ## Workflow files
 
-**Export** saves the canvas and downloads `<name>.maestro.json`:
+**Export** saves the canvas and downloads `<name>.joseki.json`:
 
 ```json
 {
@@ -158,39 +156,28 @@ Live smoke: `npm run smoke:tools --prefix server` (creates a small workflow, has
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key (workflow prompt nodes) |
-| `ANTHROPIC_API_KEY` | Anthropic API key (optional) |
-| `OPENROUTER_API_KEY` | OpenRouter API key (chat) |
-| `OPENROUTER_DEFAULT_MODEL` | Model for new conversations (default: `openai/gpt-4o-mini`) |
-| `DATABASE_PATH` | SQLite database path |
-| `PORT` | Server port (default: 3001) |
-| `CLIENT_URL` | Frontend URL for CORS |
+The server and the client read **different files**, and neither reads a `.env` at the repo root:
+
+- **`server/.env`** — everything below except `VITE_WS_URL`. The server loads it with `import 'dotenv/config'`, which resolves against the working directory, and every script that starts the server does `cd server` first. Start from `server/.env.example`.
+- **`client/.env`** — the `VITE_*` variables only. Vite reads its own root; no `envDir` is configured. Not needed in development, where the dev server proxies `/api`, `/health` and `/socket.io` to port 3001.
+
+| Variable | File | Description |
+|----------|------|-------------|
+| `OPENAI_API_KEY` | `server/.env` | OpenAI API key (workflow prompt nodes). A Run fails at adapter construction without it |
+| `OPENROUTER_API_KEY` | `server/.env` | OpenRouter API key (chat). Without it the chat routes answer `503` |
+| `OPENROUTER_DEFAULT_MODEL` | `server/.env` | Model for new conversations (default: `openai/gpt-4o-mini`) |
+| `DATABASE_PATH` | `server/.env` | SQLite database path. Relative paths resolve against `server/` (default: `./data/joseki.db`) |
+| `PORT` | `server/.env` | Server port (default: 3001) |
+| `CLIENT_URL` | `server/.env` | Frontend origin for CORS (default: `http://localhost:5173`) |
+| `VITE_WS_URL` | `client/.env` | Socket.io origin, if not the default `ws://localhost:3001` |
 
 ## Architecture
 
-MaestroAI consists of three main components:
+Joseki consists of three main components:
 
 1. **Visual Editor** (`client/`): React-based node editor built with React Flow
 2. **Execution Engine** (`server/`): Node.js backend for workflow execution
 3. **Shared Types** (`shared/`): Workflow/node/execution types shared by client and server
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-See [NOTICE](NOTICE) file for third-party attribution.
 
 ## Acknowledgments
 

@@ -1,4 +1,4 @@
-// Shared types and utilities for MaestroAI
+// Shared types and utilities for Joseki
 
 import type { MergePatch } from './patch';
 export { createExampleWorkflow } from './exampleWorkflow';

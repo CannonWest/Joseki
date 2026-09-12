@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { activePath } from '@maestroai/shared';
-import type { ChatMessage, ChatParamsPatch } from '@maestroai/shared';
+import { activePath } from '@joseki/shared';
+import type { ChatMessage, ChatParamsPatch } from '@joseki/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { ConversationList } from './ConversationList';

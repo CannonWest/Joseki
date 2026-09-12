@@ -1,4 +1,4 @@
-import type { ChatToolCall } from '@maestroai/shared';
+import type { ChatToolCall } from '@joseki/shared';
 
 /**
  * One streaming fragment of a tool call, as OpenAI-compatible providers emit

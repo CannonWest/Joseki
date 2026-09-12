@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import type { Workflow, WorkflowEdge, WorkflowNode } from '@maestroai/shared';
-import { generateId, validateWorkflow, validateWorkflowStructure } from '@maestroai/shared';
+import type { Workflow, WorkflowEdge, WorkflowNode } from '@joseki/shared';
+import { generateId, validateWorkflow, validateWorkflowStructure } from '@joseki/shared';
 import { Database } from '../db/database';
 
 const router = Router();

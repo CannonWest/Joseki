@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { validateWorkflow } from '@maestroai/shared';
+import { validateWorkflow } from '@joseki/shared';
 import { Database } from '../db/database';
 import { WorkflowExecutor } from '../engine/executor';
 

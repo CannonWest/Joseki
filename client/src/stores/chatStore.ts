@@ -15,7 +15,7 @@ import type {
   Conversation,
   ConversationDetail,
   ModelEndpoints
-} from '@maestroai/shared';
+} from '@joseki/shared';
 
 export const DEFAULT_CONVERSATION_TITLE = 'New conversation';
 const TITLE_MAX_LENGTH = 60;

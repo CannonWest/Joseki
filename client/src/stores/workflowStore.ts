@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Workflow, WorkflowNode, WorkflowEdge, WorkflowValidation } from '@maestroai/shared';
+import type { Workflow, WorkflowNode, WorkflowEdge, WorkflowValidation } from '@joseki/shared';
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {

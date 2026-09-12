@@ -1,4 +1,4 @@
-import type { ChatModel, ChatParamsPatch, Conversation, OpenRouterSampling } from '@maestroai/shared';
+import type { ChatModel, ChatParamsPatch, Conversation, OpenRouterSampling } from '@joseki/shared';
 import { SettingsSection } from './SettingsSection';
 import { NumberField, countSet } from './fields';
 

@@ -1,5 +1,5 @@
-import type { Workflow, WorkflowNode, ExecutionContext, ExecutionTrace, NodeType } from '@maestroai/shared';
-import { generateId, calculateCost } from '@maestroai/shared';
+import type { Workflow, WorkflowNode, ExecutionContext, ExecutionTrace, NodeType } from '@joseki/shared';
+import { generateId, calculateCost } from '@joseki/shared';
 import Handlebars from 'handlebars';
 import { Parser as ExprParser } from 'expr-eval';
 import { LLMAdapter } from '../adapters/llm';

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { ChatMessage } from '@maestroai/shared';
-import { latestLeafUnder, siblingsOf } from '@maestroai/shared';
+import type { ChatMessage } from '@joseki/shared';
+import { latestLeafUnder, siblingsOf } from '@joseki/shared';
 import type { StreamingReply, ToolActivity } from '../../stores/chatStore';
 import { MessageBubble, StreamingBubble, type BranchNav } from './MessageBubble';
 import { ToolTurnCard } from './ToolTurnCard';

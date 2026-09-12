@@ -1,6 +1,6 @@
 import { Parser } from 'expr-eval';
-import type { ExecutionContext, Workflow, WorkflowNode } from '@maestroai/shared';
-import { generateId, validateWorkflow } from '@maestroai/shared';
+import type { ExecutionContext, Workflow, WorkflowNode } from '@joseki/shared';
+import { generateId, validateWorkflow } from '@joseki/shared';
 import { WorkflowExecutor } from '../engine/executor';
 import { ToolRegistry, fail, ok, type ToolContext, type ToolDefinition } from './registry';
 
@@ -22,7 +22,7 @@ const describeInputs = (workflow: Workflow): string => {
 export const listWorkflows: ToolDefinition = {
   name: 'list_workflows',
   description:
-    'List the stored MaestroAI workflows: name, id, node count and the names of their input nodes (the keys run_workflow expects).',
+    'List the stored Joseki workflows: name, id, node count and the names of their input nodes (the keys run_workflow expects).',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   async execute(_args, { db }) {
     const workflows = db.getAllWorkflows();
@@ -40,7 +40,7 @@ export const listWorkflows: ToolDefinition = {
 export const runWorkflow: ToolDefinition = {
   name: 'run_workflow',
   description:
-    'Run a stored MaestroAI workflow and return what it produced. Give the workflow by name or id, and its inputs as an object keyed by input-node name (see list_workflows). Prompt nodes call the configured LLM; a node that fails is reported, not fatal.',
+    'Run a stored Joseki workflow and return what it produced. Give the workflow by name or id, and its inputs as an object keyed by input-node name (see list_workflows). Prompt nodes call the configured LLM; a node that fails is reported, not fatal.',
   parameters: {
     type: 'object',
     properties: {

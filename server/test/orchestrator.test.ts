@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
+import type { ChatTokenUsage, ChatToolCall } from '@joseki/shared';
 import type { Database } from '../src/db/database';
 import type { ChatRequest, ChatStreamEvent } from '../src/providers/openrouter';
 import {

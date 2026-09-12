@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ChatParamsPatch, Conversation } from '@maestroai/shared';
+import type { ChatParamsPatch, Conversation } from '@joseki/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { RoutingSection } from './settings/RoutingSection';
 import { SamplingSection } from './settings/SamplingSection';

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
-import type { ChatMessage, Conversation } from '@maestroai/shared';
+import type { ChatMessage, Conversation } from '@joseki/shared';
 import { Database } from '../src/db/database';
 
 function conversation(id: string, stamp = 1000): Conversation {
@@ -163,7 +163,7 @@ test('deleting a workflow that has run removes its executions and traces too', (
 });
 
 test('opening an existing database replaces the vestigial conversation_trees table', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestroai-db-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'joseki-db-'));
   const file = path.join(dir, 'legacy.db');
   const legacy = new BetterSqlite3(file);
   legacy.exec(`CREATE TABLE conversation_trees (id TEXT PRIMARY KEY, nodes TEXT NOT NULL)`);
@@ -187,7 +187,7 @@ test('opening an existing database replaces the vestigial conversation_trees tab
 });
 
 test('opening a database from before reasoning_details adds the column and keeps the rows', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestroai-db-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'joseki-db-'));
   const file = path.join(dir, 'older.db');
   const older = new BetterSqlite3(file);
   older.exec(`

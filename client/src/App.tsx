@@ -50,8 +50,8 @@ import { OutputNode } from './nodes/OutputNode';
 import { AggregateNode } from './nodes/AggregateNode';
 import { HumanGateNode } from './nodes/HumanGateNode';
 import { ModelCompareNode } from './nodes/ModelCompareNode';
-import { createExampleWorkflow, validateWorkflow } from '@maestroai/shared';
-import type { NodeType, Workflow, WorkflowValidation } from '@maestroai/shared';
+import { createExampleWorkflow, validateWorkflow } from '@joseki/shared';
+import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
 const nodeTypes = {
   prompt: PromptNode,
@@ -277,7 +277,7 @@ function Flow({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${saved.name.replace(/[^\w.-]+/g, '_') || 'workflow'}.maestro.json`;
+      link.download = `${saved.name.replace(/[^\w.-]+/g, '_') || 'workflow'}.joseki.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -632,7 +632,7 @@ function App() {
     return (
       <div className="h-screen w-full bg-slate-950 flex items-center justify-center">
         <div className="max-w-2xl w-full mx-4">
-          <h1 className="text-4xl font-bold text-white mb-2">MaestroAI</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">Joseki</h1>
           <p className="text-slate-400 mb-8">Visual IDE for conversational AI workflows</p>
           
           <div className="grid grid-cols-2 gap-4 mb-8">
@@ -672,7 +672,7 @@ function App() {
             >
               <div className="text-2xl mb-2">⇪</div>
               <div className="font-semibold text-white">Import Workflow</div>
-              <div className="text-sm text-slate-400">From a MaestroAI JSON export</div>
+              <div className="text-sm text-slate-400">From a Joseki JSON export</div>
             </button>
 
             <button

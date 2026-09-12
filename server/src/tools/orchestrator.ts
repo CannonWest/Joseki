@@ -1,4 +1,4 @@
-import type { ChatParams, ChatTokenUsage, ChatToolCall } from '@maestroai/shared';
+import type { ChatParams, ChatTokenUsage, ChatToolCall } from '@joseki/shared';
 import type {
   AssistantWireMessage,
   ChatRequest,

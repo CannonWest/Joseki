@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Workflow, WorkflowEdge, WorkflowNode } from '@maestroai/shared';
+import type { Workflow, WorkflowEdge, WorkflowNode } from '@joseki/shared';
 import { Database } from '../src/db/database';
 import { WorkflowExecutor } from '../src/engine/executor';
 import type { LLMAdapter } from '../src/adapters/llm';

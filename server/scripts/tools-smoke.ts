@@ -17,7 +17,7 @@ import type {
   Conversation,
   ConversationDetail,
   Workflow
-} from '@maestroai/shared';
+} from '@joseki/shared';
 
 const args = parseArgs(process.argv.slice(2));
 const url = (args.url ?? 'http://localhost:3001').replace(/\/+$/, '');

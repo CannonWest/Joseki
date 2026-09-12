@@ -1,7 +1,7 @@
 import { Database } from './database';
 import path from 'path';
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/maestroai.db');
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/joseki.db');
 
 console.log('Initializing database at:', dbPath);
 

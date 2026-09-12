@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
+import type { ChatMessage, ChatToolCall } from '@joseki/shared';
 import type { ToolActivity } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
 import { Meta, Reasoning, ReplyActions, assistantMeta, useReplyModel, type BranchNav } from './MessageBubble';

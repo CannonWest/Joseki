@@ -1,12 +1,14 @@
 import DatabaseBetter from 'better-sqlite3';
+import fs from 'fs';
+import nodePath from 'path';
 import type {
   Workflow,
   ExecutionTrace,
   ModelConfig,
   Conversation,
   ChatMessage
-} from '@maestroai/shared';
-import { createExampleWorkflow, generateId } from '@maestroai/shared';
+} from '@joseki/shared';
+import { createExampleWorkflow, generateId } from '@joseki/shared';
 
 export type ConversationPatch = Partial<
   Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'params' | 'activeLeafId'>
@@ -16,6 +18,16 @@ export class Database {
   private db: DatabaseBetter.Database;
 
   constructor(path: string) {
+    // better-sqlite3 will not create the parent directory, and server/data/ is
+    // absent from a fresh clone — so db:init threw before touching a table.
+    // ':memory:' is not a path and must not be resolved into one (the tests
+    // use it throughout).
+    if (path !== ':memory:') {
+      const dir = nodePath.dirname(nodePath.resolve(path));
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    }
     this.db = new DatabaseBetter(path);
     this.initTables();
   }

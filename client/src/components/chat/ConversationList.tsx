@@ -1,4 +1,4 @@
-import type { Conversation } from '@maestroai/shared';
+import type { Conversation } from '@joseki/shared';
 import { relativeTime, shortModel } from './format';
 
 interface ConversationListProps {
