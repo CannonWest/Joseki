@@ -36,6 +36,8 @@ The app will be available at:
 - Frontend: http://localhost:5173
 - Backend: http://localhost:3001
 
+After adding a **runtime** export to `shared`, restart the client dev server with its dependency cache cleared (`rm -rf client/node_modules/.vite`): Vite pre-bundles `@maestroai/shared` once at startup, so the page otherwise loads the stale bundle and renders blank with `does not provide an export named …` — while `tsc` still passes against the rebuilt `shared/dist`. Type-only additions need no restart.
+
 ## Project Structure
 
 ```
@@ -88,7 +90,7 @@ The server holds multi-turn conversations against any model on [OpenRouter](http
 
 The client's **Chat** view (the Chat card on the welcome screen, or the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and a per-reply line of model, the provider that served it, tokens (thinking tokens named), cost and latency, a searchable model picker over the catalog, and per-conversation settings — model, system prompt, temperature, max tokens, plus **Routing** (the model's provider roster with an order / only / skip pick per provider, and the gateway's routing preferences), **Sampling** and **Reasoning** sections that show only the controls the chosen model supports. A reply the gateway reported no cost for shows an estimate from catalog pricing, marked `~`; the header carries the conversation's spend across every branch.
 
-Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model.
+Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model. In the client, **Retry** on a reply and **Edit** on a message each send the user message again under the same parent — a new branch with its own reply — and a message with alternatives shows a **‹ 2/3 ›** switch that moves `activeLeafId` to that branch's newest leaf.
 
 ### API
 
@@ -113,7 +115,7 @@ A PATCH applies `params` as a [JSON Merge Patch](https://www.rfc-editor.org/rfc/
 
 ### Socket events
 
-Send `chat:send` with `{ conversationId, content, parentId?, model?, params? }`. The reply streams back to everyone in the conversation's room (join with `chat:join`):
+Send `chat:send` with `{ conversationId, content, parentId?, model?, params? }` — `parentId` defaults to the active leaf; a message id branches under that message, and `null` starts a new branch at the root. The reply streams back to everyone in the conversation's room (join with `chat:join`):
 
 | Event | Payload |
 |-------|---------|

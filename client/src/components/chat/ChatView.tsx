@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { activePath } from '@maestroai/shared';
-import type { ChatParamsPatch } from '@maestroai/shared';
+import type { ChatMessage, ChatParamsPatch } from '@maestroai/shared';
 import { useChatStore } from '../../stores/chatStore';
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { ConversationList } from './ConversationList';
@@ -93,6 +93,33 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
 
   const handleCancel = () => {
     if (conversation) cancel(conversation.id);
+  };
+
+  // Branching is one primitive: send a user message under the same parent as
+  // an existing one, and the tree gains a sibling with its own reply.
+  const handleRetry = (reply: ChatMessage) => {
+    if (!conversation) return;
+    // The user message that led here — up through any tool turns and results.
+    let origin = messages.find((m) => m.id === reply.parentId);
+    while (origin && origin.role !== 'user') {
+      const parentId = origin.parentId;
+      origin = parentId ? messages.find((m) => m.id === parentId) : undefined;
+    }
+    if (!origin) return;
+    clearError();
+    send({ conversationId: conversation.id, content: origin.content, parentId: origin.parentId });
+  };
+
+  const handleEdit = (message: ChatMessage, content: string) => {
+    if (!conversation) return;
+    clearError();
+    send({ conversationId: conversation.id, content, parentId: message.parentId });
+  };
+
+  const handleSelectBranch = async (leafId: string) => {
+    if (conversation && leafId !== conversation.activeLeafId) {
+      await updateConversation(conversation.id, { activeLeafId: leafId });
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -189,9 +216,14 @@ export function ChatView({ onOpenWorkflows }: ChatViewProps) {
               <>
                 <MessageThread
                   messages={thread}
+                  tree={messages}
                   streaming={streaming}
                   generating={generating}
                   toolActivity={toolActivity}
+                  busy={busy || disabled}
+                  onRetry={handleRetry}
+                  onEdit={handleEdit}
+                  onSelectBranch={(leafId) => void handleSelectBranch(leafId)}
                 />
                 <Composer
                   disabled={disabled}

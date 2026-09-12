@@ -626,3 +626,23 @@ test('send shapes the turn to the model: unsupported params dropped, tools withh
   // The conversation keeps what the user set; only the turn was shaped.
   assert.deepEqual(db.getConversation(conversation.id)?.params.temperature, 0.2);
 });
+
+test('send with parentId null starts a branch at the root; a parent id branches under it', async () => {
+  const { db, provider, service } = setup(reply(['ok']));
+  const conversation = service.createConversation();
+  await service.send({ conversationId: conversation.id, content: 'first' });
+  const firstReply = db.getConversation(conversation.id)?.activeLeafId;
+
+  // Retry of the first message: a second root, its history one message long.
+  await service.send({ conversationId: conversation.id, content: 'first, again', parentId: null });
+  const roots = db.getMessages(conversation.id).filter((m) => m.parentId === null);
+  assert.deepEqual(roots.map((m) => m.content), ['first', 'first, again']);
+  assert.equal(provider.requests[1].messages.length, 1);
+  assert.notEqual(db.getConversation(conversation.id)?.activeLeafId, firstReply);
+
+  // An explicit parent: a sibling under the first branch, history three long.
+  await service.send({ conversationId: conversation.id, content: 'second', parentId: firstReply ?? undefined });
+  assert.equal(provider.requests[2].messages.length, 3);
+  const second = db.getMessages(conversation.id).find((m) => m.content === 'second');
+  assert.equal(second?.parentId, firstReply);
+});

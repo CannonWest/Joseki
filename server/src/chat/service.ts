@@ -138,7 +138,11 @@ export class ChatService {
     }
 
     let parentId = conversation.activeLeafId;
-    if (request.parentId) {
+    if (request.parentId === null) {
+      // An explicit null starts a branch at the root — a retry or an edit
+      // of the conversation's first message.
+      parentId = null;
+    } else if (request.parentId) {
       const parent = this.db.getMessage(request.parentId);
       if (!parent || parent.conversationId !== conversation.id) {
         throw new ChatError('parentId does not belong to this conversation', 'invalid');

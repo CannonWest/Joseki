@@ -1,18 +1,39 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '@maestroai/shared';
+import { latestLeafUnder, siblingsOf } from '@maestroai/shared';
 import type { StreamingReply, ToolActivity } from '../../stores/chatStore';
-import { MessageBubble, StreamingBubble } from './MessageBubble';
+import { MessageBubble, StreamingBubble, type BranchNav } from './MessageBubble';
 import { ToolTurnCard } from './ToolTurnCard';
 
 interface MessageThreadProps {
   /** The branch in view, oldest first. */
   messages: ChatMessage[];
+  /** Every message of the conversation — the whole tree, for the branch counters. */
+  tree: ChatMessage[];
   streaming: StreamingReply | null;
   generating: boolean;
   toolActivity: ToolActivity[];
+  /** A reply is in flight: retry, edit and branch switching wait. */
+  busy: boolean;
+  /** Generate a reply again from the user message that led to `reply` — a new branch. */
+  onRetry: (reply: ChatMessage) => void;
+  /** Send an edited version of a user message — a new branch. */
+  onEdit: (message: ChatMessage, content: string) => void;
+  /** Show another branch: its leaf becomes the conversation's active leaf. */
+  onSelectBranch: (leafId: string) => void;
 }
 
-export function MessageThread({ messages, streaming, generating, toolActivity }: MessageThreadProps) {
+export function MessageThread({
+  messages,
+  tree,
+  streaming,
+  generating,
+  toolActivity,
+  busy,
+  onRetry,
+  onEdit,
+  onSelectBranch
+}: MessageThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Keep following the bottom unless the reader scrolled up to look at something.
   const followRef = useRef(true);
@@ -43,6 +64,24 @@ export function MessageThread({ messages, streaming, generating, toolActivity }:
     (message) => !(message.role === 'tool' && message.toolCallId && claimed.has(message.toolCallId))
   );
 
+  // A message with siblings (retries, edits) gets a counter; choosing a
+  // sibling shows that branch down to its newest leaf.
+  const branchFor = (message: ChatMessage): BranchNav | undefined => {
+    const siblings = siblingsOf(tree, message);
+    if (siblings.length < 2) return undefined;
+    const index = siblings.findIndex((sibling) => sibling.id === message.id);
+    const go = (offset: number) => {
+      const target = siblings[index + offset];
+      if (target) onSelectBranch(latestLeafUnder(tree, target.id));
+    };
+    return {
+      index,
+      count: siblings.length,
+      onPrev: index > 0 ? () => go(-1) : undefined,
+      onNext: index < siblings.length - 1 ? () => go(1) : undefined
+    };
+  };
+
   const empty = messages.length === 0 && !streaming && !generating;
   const runningTools = toolActivity.some((activity) => activity.status === 'running');
 
@@ -55,9 +94,24 @@ export function MessageThread({ messages, streaming, generating, toolActivity }:
       )}
       {shown.map((message) =>
         message.role === 'assistant' && message.toolCalls?.length ? (
-          <ToolTurnCard key={message.id} message={message} results={results} activity={toolActivity} />
+          <ToolTurnCard
+            key={message.id}
+            message={message}
+            results={results}
+            activity={toolActivity}
+            branch={branchFor(message)}
+            busy={busy}
+            onRetry={() => onRetry(message)}
+          />
         ) : (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble
+            key={message.id}
+            message={message}
+            branch={branchFor(message)}
+            busy={busy}
+            onRetry={message.role === 'assistant' ? () => onRetry(message) : undefined}
+            onEdit={message.role === 'user' ? (content) => onEdit(message, content) : undefined}
+          />
         )
       )}
       {streaming && <StreamingBubble reply={streaming} />}

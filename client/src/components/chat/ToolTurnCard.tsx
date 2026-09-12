@@ -1,7 +1,7 @@
 import type { ChatMessage, ChatToolCall } from '@maestroai/shared';
 import type { ToolActivity } from '../../stores/chatStore';
 import { Markdown } from './Markdown';
-import { Meta, Reasoning, assistantMeta, useReplyModel } from './MessageBubble';
+import { Meta, Reasoning, ReplyActions, assistantMeta, useReplyModel, type BranchNav } from './MessageBubble';
 import { formatLatency, prettyJson, truncate } from './format';
 
 interface ToolTurnCardProps {
@@ -11,6 +11,9 @@ interface ToolTurnCardProps {
   results: Map<string, ChatMessage>;
   /** Live status of calls whose result is not stored yet. */
   activity: ToolActivity[];
+  branch?: BranchNav;
+  busy?: boolean;
+  onRetry?: () => void;
 }
 
 type Status = 'pending' | 'running' | 'ok' | 'error';
@@ -30,7 +33,7 @@ const statusLabel: Record<Status, string> = {
 };
 
 /** An assistant turn that called tools: its text, then one row per call with the result. */
-export function ToolTurnCard({ message, results, activity }: ToolTurnCardProps) {
+export function ToolTurnCard({ message, results, activity, branch, busy = false, onRetry }: ToolTurnCardProps) {
   const model = useReplyModel(message);
   return (
     <div className="flex justify-start">
@@ -46,6 +49,7 @@ export function ToolTurnCard({ message, results, activity }: ToolTurnCardProps) 
           />
         ))}
         <Meta items={assistantMeta(message, model)} />
+        <ReplyActions branch={branch} busy={busy} onRetry={onRetry} />
       </div>
     </div>
   );
