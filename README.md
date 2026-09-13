@@ -6,7 +6,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 
 - **Visual Canvas**: Drag-and-drop workflow builder with React Flow
 - **Node Types**: Prompt, Branch, Aggregate, Human Gate
-- **Real-time Execution**: WebSocket streaming with live token output
+- **Real-time Execution**: WebSocket streaming with live token output; nodes that don't depend on each other run at once
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
 - **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
 - **Model Comparison**: Fan one prompt out to several models and read the answers together — Best of Four in Examples is the shape
@@ -132,7 +132,7 @@ The `Examples` folder holds the three workflows Joseki ships, one per shape.
 
 **Best of Four** — input → four cheap models → a judge → output. The fan: one prompt goes out to four models from four houses, and a fifth reads all four answers and reprints the best one in full. The four are identical but for the model they name, so the model is the only thing the comparison measures. The judge is the point — four arrows arrive at once and `{{input}}` is only the first of them, so it names every node it reads, the input node included. It is told A, B, C and D and never which model wrote which; the node labels carry the key, and the judge is from a house that is not in the field. No gate, so chat can run this one too.
 
-The fan is about what feeds what, not wall-clock: the executor runs one node at a time, so the four answers come in turn.
+The four go out at once — the executor runs every node whose arrows are resolved — so the fan takes as long as its slowest answer, not the sum of the four.
 
 They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. **Try Example** does the same before opening the pipeline. Neither touches an example that is there.
 

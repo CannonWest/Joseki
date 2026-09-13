@@ -27,9 +27,9 @@
  *   The order it reads them in is fixed, though, so a judge with a position
  *   preference has the same one every run — consistent, not absent.
  *
- * Joseki takes the four in turn rather than at once: the executor runs one
- * node at a time. Four cheap answers and a verdict is still cents, and the
- * fan is about what feeds what, not about wall-clock.
+ * The four go out at once: the executor runs every node whose arrows are
+ * resolved, so the fan takes as long as its slowest arm, not the sum of
+ * the four. Four cheap answers and a verdict is still cents.
  */
 
 import type { Workflow, WorkflowNode, WorkflowEdge, PromptConfig, OutputConfig } from './index';

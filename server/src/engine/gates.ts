@@ -59,6 +59,14 @@ export class GateRegistry {
     return true;
   }
 
+  /** Fail one waiting gate. False when nothing is waiting there. */
+  fail(executionId: string, nodeId: string, reason: string): boolean {
+    const waiter = this.waiters.get(this.key(executionId, nodeId));
+    if (!waiter) return false;
+    waiter.fail(new Error(reason));
+    return true;
+  }
+
   /** Fail every gate the execution is waiting at. Returns how many there were. */
   cancel(executionId: string, reason: string): number {
     let count = 0;

@@ -146,20 +146,28 @@ export class WorkflowExecutor {
   /**
    * Runs the workflow by following arrows.
    *
-   * A node is ready once every arrow into it is resolved. If at least one
-   * arrow was taken it runs, fed by the outputs on the taken arrows; if
-   * none were, it is skipped and its own arrows die, so a join after a
-   * branch waits for exactly the paths that were chosen and no longer.
-   * Nodes with several outputs (branch, human gate) choose one handle and
-   * only the arrows on that handle fire.
+   * A node is ready once every arrow into it is resolved, and it runs the
+   * moment it is: nodes that do not depend on each other run at the same
+   * time, and a join waits for exactly its own arrows, however they finish.
+   * If at least one arrow in was taken the node runs, fed by the outputs on
+   * the taken arrows in arrow order; if none were, it is skipped and its own
+   * arrows die, so a join after a branch waits for exactly the paths that
+   * were chosen and no longer. Nodes with several outputs (branch, human
+   * gate) choose one handle and only the arrows on that handle fire.
    *
    * An arrow that points backwards — a gate's fail arrow sending work back
    * — is a trigger, not a dependency: its target never waits on it and is
    * not fed by it. When it fires, the target and everything downstream of
-   * it are re-run, up to the gate's maxRevisions.
+   * it are re-run, up to the gate's maxRevisions. Anything among them still
+   * running belongs to the lap being thrown away: it is recorded when it
+   * finishes, since it happened and it cost, but it stores nothing and fires
+   * no arrows, and a gate still waiting is failed so it asks again.
    *
    * A node that fails does what its error strategy says: stop the run, try
-   * again, or carry a fallback value and go on. See `runNode`.
+   * again, or carry a fallback value and go on. See `runNode`. When the run
+   * stops, nothing new starts; what is already running finishes and is
+   * recorded, a gate still waiting is released, and the first failure is
+   * thrown once nothing is left running.
    */
   async execute(
     workflow: Workflow,
@@ -220,6 +228,15 @@ export class WorkflowExecutor {
     const touched = new Set<string>(startNodes);
     const queue = [...startNodes];
     const revisions = new Map<string, number>();
+    const registry = options.gates ?? sharedGates;
+
+    // Every launch of a node carries the lap it was launched in. A gate
+    // sending work back moves everything it un-does to the next lap, so a
+    // run still in flight from before can be told from the one replacing
+    // it: what it produced is recorded — it happened, and it cost — but it
+    // stores nothing and fires no arrows.
+    const lap = new Map<string, number>();
+    const lapOf = (nodeId: string) => lap.get(nodeId) ?? 0;
 
     const enqueue = (nodeId: string) => {
       if (!done.has(nodeId) && !queue.includes(nodeId)) {
@@ -243,47 +260,40 @@ export class WorkflowExecutor {
     /**
      * Forget that `target` and everything after it ran, so they run again.
      * Their outputs stay in the context until overwritten, so the next lap
-     * can read the gate's decision.
+     * can read the gate's decision. One of them still running belongs to
+     * the lap being thrown away, and a gate still waiting is failed so it
+     * asks again with the redone content.
      */
     const rework = (target: string) => {
       const again = downstreamOf(target);
       again.add(target);
       for (const id of again) {
         done.delete(id);
+        lap.set(id, lapOf(id) + 1);
         for (const edge of outgoing.get(id) ?? []) edgeState.delete(edge.id);
+        if (nodeMap.get(id)?.type === 'human_gate') {
+          registry.fail(executionId, id, 'Superseded: the work was sent back before a decision was made');
+        }
       }
       enqueue(target);
     };
 
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      if (done.has(nodeId)) continue;
+    // What is running, and the first thing that went wrong. After a failure
+    // nothing new is launched, but what is already running is left to finish
+    // and be recorded — a model call cannot be taken back — and any gate
+    // still waiting is released so the run does not hang on a reviewer.
+    const inFlight = new Set<Promise<void>>();
+    let failure: unknown;
+    const fail = (error: unknown) => {
+      if (failure !== undefined) return;
+      failure = error;
+      registry.cancel(executionId, `Run failed: ${error instanceof Error ? error.message : String(error)}`);
+    };
 
-      const node = nodeMap.get(nodeId);
-      if (!node) continue;
-
-      const inEdges = forwardIn(nodeId);
-      // Not ready yet; the arrow that resolves last will queue it again.
-      if (inEdges.some(e => (edgeState.get(e.id) ?? 'pending') === 'pending')) continue;
-
-      const takenEdges = inEdges.filter(e => edgeState.get(e.id) === 'taken');
-      done.add(nodeId);
-
-      if (inEdges.length > 0 && takenEdges.length === 0) {
-        // Every arrow in is dead; their sources are what decided against
-        // this path. Listed once each, in arrow order.
-        const skippedBy = [...new Set(inEdges.map((e) => e.source))];
-        const trace = this.skippedTrace(executionId, skippedBy);
-        this.db.createExecutionTrace({ ...trace, executionId, nodeId });
-        options.onNodeComplete?.(nodeId, trace);
-        resolveOutgoing(node, NO_HANDLE);
-        continue;
-      }
-
-      const inputs: NodeInput[] = takenEdges.map(e => ({
-        nodeId: e.source,
-        output: context[e.source]?.output
-      }));
+    /** Runs one node and, when it is still this lap's run, lets it decide what follows. */
+    const launch = (node: WorkflowNode, inputs: NodeInput[]) => {
+      const nodeId = node.id;
+      const launched = lapOf(nodeId);
       const run: RunState = { executionId, revision: revisions.get(nodeId) ?? 0 };
       // A retrying node records the attempts it gave up on as it goes; the
       // attempt it ended on is recorded below, with the rest of the run.
@@ -291,38 +301,91 @@ export class WorkflowExecutor {
         this.db.createExecutionTrace({ ...attempt, executionId, nodeId });
         options.onNodeComplete?.(nodeId, attempt);
       };
-      const { trace, selectedHandle, decision } = await this.runNode(node, inputs, context, run, options, record);
 
-      context[nodeId] = decision ? { output: trace.output, trace, decision } : { output: trace.output, trace };
-      record(trace);
+      const work = (async () => {
+        const { trace, selectedHandle, decision } = await this.runNode(node, inputs, context, run, options, record);
+        record(trace);
 
-      // Still failed, so its error strategy is spent — it had no strategy, or
-      // it ran out of tries. An arrow out of it has nothing meaningful to
-      // carry, so stop here rather than run the rest of the graph on a null.
-      if (trace.status === 'error') {
-        throw new NodeFailedError(nodeId, context, `Node "${node.data.label}" (${nodeId}) failed: ${trace.error}`);
-      }
+        // Superseded while it ran: the lap it belonged to has been thrown away.
+        if (lapOf(nodeId) !== launched) return;
 
-      const fired = resolveOutgoing(node, selectedHandle);
+        context[nodeId] = decision ? { output: trace.output, trace, decision } : { output: trace.output, trace };
 
-      if (decision?.verdict === 'fail') {
-        if (fired.length === 0) {
-          throw new Error(`Rejected at "${node.data.label}" (${nodeId}): the gate has no fail arrow to follow`);
+        // Still failed, so its error strategy is spent — it had no strategy, or
+        // it ran out of tries. An arrow out of it has nothing meaningful to
+        // carry, so stop here rather than run the rest of the graph on a null.
+        if (trace.status === 'error') {
+          throw new NodeFailedError(nodeId, context, `Node "${node.data.label}" (${nodeId}) failed: ${trace.error}`);
         }
-        const sentBack = fired.filter(e => backEdges.has(e.id));
-        if (sentBack.length) {
-          const limit: number = (node.data.config as any).maxRevisions ?? DEFAULT_MAX_REVISIONS;
-          const count = run.revision + 1;
-          if (count > limit) {
-            throw new Error(
-              `"${node.data.label}" (${nodeId}) sent the work back ${count} times; maxRevisions is ${limit}`
-            );
+
+        const fired = resolveOutgoing(node, selectedHandle);
+
+        if (decision?.verdict === 'fail') {
+          if (fired.length === 0) {
+            throw new Error(`Rejected at "${node.data.label}" (${nodeId}): the gate has no fail arrow to follow`);
           }
-          revisions.set(nodeId, count);
-          for (const edge of sentBack) rework(edge.target);
+          const sentBack = fired.filter(e => backEdges.has(e.id));
+          if (sentBack.length) {
+            const limit: number = (node.data.config as any).maxRevisions ?? DEFAULT_MAX_REVISIONS;
+            const count = run.revision + 1;
+            if (count > limit) {
+              throw new Error(
+                `"${node.data.label}" (${nodeId}) sent the work back ${count} times; maxRevisions is ${limit}`
+              );
+            }
+            revisions.set(nodeId, count);
+            for (const edge of sentBack) rework(edge.target);
+          }
         }
+      })();
+
+      const tracked: Promise<void> = work.then(
+        () => { inFlight.delete(tracked); },
+        (error) => { inFlight.delete(tracked); fail(error); }
+      );
+      inFlight.add(tracked);
+    };
+
+    // Launch everything that is ready, wait for something to finish, and go
+    // again. The queue only ever holds nodes an arrow just reached; one that
+    // is not ready yet is dropped, and the arrow that resolves last will
+    // queue it again.
+    for (;;) {
+      while (queue.length > 0 && failure === undefined) {
+        const nodeId = queue.shift()!;
+        if (done.has(nodeId)) continue;
+
+        const node = nodeMap.get(nodeId);
+        if (!node) continue;
+
+        const inEdges = forwardIn(nodeId);
+        if (inEdges.some(e => (edgeState.get(e.id) ?? 'pending') === 'pending')) continue;
+
+        const takenEdges = inEdges.filter(e => edgeState.get(e.id) === 'taken');
+        done.add(nodeId);
+
+        if (inEdges.length > 0 && takenEdges.length === 0) {
+          // Every arrow in is dead; their sources are what decided against
+          // this path. Listed once each, in arrow order.
+          const skippedBy = [...new Set(inEdges.map((e) => e.source))];
+          const trace = this.skippedTrace(executionId, skippedBy);
+          this.db.createExecutionTrace({ ...trace, executionId, nodeId });
+          options.onNodeComplete?.(nodeId, trace);
+          resolveOutgoing(node, NO_HANDLE);
+          continue;
+        }
+
+        launch(
+          node,
+          takenEdges.map(e => ({ nodeId: e.source, output: context[e.source]?.output }))
+        );
       }
+
+      if (inFlight.size === 0) break;
+      await Promise.race(inFlight);
     }
+
+    if (failure !== undefined) throw failure;
 
     // Anything an arrow reached but that never became ready is waiting on an
     // arrow that will never resolve.

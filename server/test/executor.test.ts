@@ -43,8 +43,18 @@ class StubLLM {
   private refusals = 0;
   /** Cost the fake gateway reports; undefined means it reported none. */
   cost: number | undefined = undefined;
+  /** When set, every call waits here until released, so a test can see what is in flight. */
+  hold = false;
+  private held: Array<{ prompt: string; release: () => void }> = [];
+  /** Lets held calls go: those whose prompt `pick` accepts, or all of them. */
+  release(pick: (prompt: string) => boolean = () => true) {
+    const going = this.held.filter((h) => pick(h.prompt));
+    this.held = this.held.filter((h) => !pick(h.prompt));
+    for (const h of going) h.release();
+  }
   async generate(p: Call) {
     this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt, params: p.params });
+    if (this.hold) await new Promise<void>((release) => this.held.push({ prompt: p.userPrompt, release }));
     const refusing =
       this.failOn !== null &&
       p.userPrompt.includes(this.failOn) &&
@@ -102,6 +112,12 @@ function harness(wf: Workflow, options: ExecutionOptions = {}, decide?: Decide) 
 }
 
 const pass: Decide = () => ({ verdict: 'pass' });
+
+/** Spins the event loop until `condition` holds, and fails the test if it never does. */
+async function until(condition: () => boolean, what: string) {
+  for (let i = 0; i < 2000 && !condition(); i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(condition(), `never happened: ${what}`);
+}
 
 const linear = () =>
   workflow(
@@ -534,6 +550,216 @@ test('cancelling the run fails the gate it is waiting at', async () => {
     return undefined;
   });
   await assert.rejects(h.run(), /Node "gate" \(gate\) failed: Cancelled by user/);
+  assert.deepEqual(h.gates.pending(), []);
+});
+
+// ------------------------------------------------- nodes that run at once
+
+// in → a, b, c → merge
+const fan = () =>
+  workflow(
+    'fan3',
+    [
+      node('in', 'input'),
+      prompt('a', 'A:{{input}}'),
+      prompt('b', 'B:{{input}}'),
+      prompt('c', 'C:{{input}}'),
+      node('merge', 'aggregate', { strategy: 'concat', separator: '+' })
+    ],
+    [edge('in', 'a'), edge('in', 'b'), edge('in', 'c'), edge('a', 'merge'), edge('b', 'merge'), edge('c', 'merge')]
+  );
+
+test('nodes that do not depend on each other run at the same time', async () => {
+  const h = harness(fan(), { inputs: { in: 'x' } });
+  h.llm.hold = true;
+  const run = h.run();
+
+  await until(() => ['a', 'b', 'c'].every((id) => h.started.includes(id)), 'all three started');
+  assert.ok(!h.completed.some((c) => ['a', 'b', 'c'].includes(c.nodeId)), 'none has finished yet');
+  assert.ok(!h.started.includes('merge'), 'the join waits');
+
+  h.llm.release();
+  const ctx = await run;
+  assert.equal(ctx.merge.output, '<gpt-4: A:x>+<gpt-4: B:x>+<gpt-4: C:x>');
+});
+
+test('a join waits for its slowest arrow, and reads them in arrow order whatever order they finished in', async () => {
+  const h = harness(fan(), { inputs: { in: 'x' } });
+  h.llm.hold = true;
+  const run = h.run();
+  await until(() => h.started.includes('c'), 'the fan is out');
+
+  // c first, then b, then a: the reverse of arrow order.
+  h.llm.release((p) => p.startsWith('C:'));
+  await until(() => h.completed.some((c) => c.nodeId === 'c'), 'c finished');
+  assert.ok(!h.started.includes('merge'));
+  h.llm.release((p) => p.startsWith('B:'));
+  await until(() => h.completed.some((c) => c.nodeId === 'b'), 'b finished');
+  assert.ok(!h.started.includes('merge'));
+  h.llm.release();
+
+  const ctx = await run;
+  assert.deepEqual(h.completed.map((c) => c.nodeId).slice(1, 4), ['c', 'b', 'a']);
+  assert.equal(ctx.merge.output, '<gpt-4: A:x>+<gpt-4: B:x>+<gpt-4: C:x>', 'arrow order, not finishing order');
+});
+
+test('when a node fails, nothing new starts; what is running finishes and is recorded; then the run throws', async () => {
+  const h = harness(fan(), { inputs: { in: 'x' } });
+  h.llm.failOn = 'A:';
+  h.llm.hold = true;
+  const run = h.run();
+  let settled = false;
+  run.then(() => { settled = true; }, () => { settled = true; });
+  await until(() => h.started.includes('c'), 'the fan is out');
+
+  h.llm.release((p) => p.startsWith('A:'));
+  await until(() => h.completed.some((c) => c.nodeId === 'a' && c.status === 'error'), 'a failed');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'the run waits for b and c');
+
+  h.llm.release();
+  await assert.rejects(run, /Node "a" \(a\) failed: model refused: A:/);
+  for (const id of ['b', 'c']) {
+    assert.ok(h.completed.some((c) => c.nodeId === id && c.status === 'success'), `${id} finished and was recorded`);
+  }
+  assert.ok(!h.started.includes('merge'), 'nothing new started');
+});
+
+test('a failing node releases a gate that was waiting, so a failed run never hangs on a reviewer', async () => {
+  // in → a (fails), in → gate (waiting) → merge
+  const wf = workflow(
+    'fail-beside-gate',
+    [node('in', 'input'), prompt('a', 'A:{{input}}'), node('gate', 'human_gate', {}), node('merge', 'aggregate', { strategy: 'concat' })],
+    [edge('in', 'a'), edge('in', 'gate'), edge('a', 'merge'), edge('gate', 'merge', 'pass')]
+  );
+  const h = harness(wf, { inputs: { in: 'x' } }, () => undefined);
+  h.llm.failOn = 'A:';
+  h.llm.hold = true;
+  const run = h.run();
+  await until(() => h.paused.length === 1, 'the gate is waiting');
+  h.llm.release();
+
+  await assert.rejects(run, /Node "a" \(a\) failed: model refused: A:/);
+  assert.deepEqual(h.gates.pending(), [], 'the gate was released');
+  assert.match(h.db.getExecutionTraces('run').find((t) => t.nodeId === 'gate')?.error ?? '', /Run failed/);
+});
+
+test('two gates on separate branches wait at the same time', async () => {
+  // in → a → gateA → merge ← gateB ← b ← in
+  const wf = workflow(
+    'two-gates',
+    [
+      node('in', 'input'),
+      prompt('a', 'A:{{input}}'),
+      prompt('b', 'B:{{input}}'),
+      node('gateA', 'human_gate', {}),
+      node('gateB', 'human_gate', {}),
+      node('merge', 'aggregate', { strategy: 'concat', separator: '+' })
+    ],
+    [edge('in', 'a'), edge('in', 'b'), edge('a', 'gateA'), edge('b', 'gateB'), edge('gateA', 'merge', 'pass'), edge('gateB', 'merge', 'pass')]
+  );
+  const h = harness(wf, { inputs: { in: 'x' } }, () => undefined);
+  const run = h.run();
+  await until(() => h.paused.length === 2, 'both gates are waiting');
+  assert.deepEqual(h.gates.pending().map((g) => g.nodeId).sort(), ['gateA', 'gateB']);
+
+  h.gates.resolve('run', 'gateB', { verdict: 'pass' });
+  h.gates.resolve('run', 'gateA', { verdict: 'pass' });
+  const ctx = await run;
+  assert.equal(ctx.merge.output, '<gpt-4: A:x>+<gpt-4: B:x>');
+});
+
+// in → draft → side → out
+//        ↑  └→ gate ─pass─→ out
+//        └──────┘ fail
+const sideLoop = () =>
+  workflow(
+    'side-loop',
+    [
+      node('in', 'input'),
+      prompt('draft', 'D:{{input}}'),
+      prompt('side', 'S:{{input}}|{{nodes.gate.decision.note}}'),
+      node('gate', 'human_gate', {}),
+      node('out', 'output')
+    ],
+    [
+      edge('in', 'draft'),
+      edge('draft', 'side'),
+      edge('draft', 'gate'),
+      edge('gate', 'out', 'pass'),
+      edge('gate', 'draft', 'fail'),
+      edge('side', 'out')
+    ]
+  );
+
+test('work sent back while a sibling is still running: the stale run is recorded but decides nothing, even finishing last', async () => {
+  const decisions: GateDecision[] = [{ verdict: 'fail', note: 'again' }, { verdict: 'pass' }];
+  const h = harness(sideLoop(), { inputs: { in: 'x' } }, (_e, i) => decisions[i]);
+  h.llm.hold = true;
+  const run = h.run();
+
+  await until(() => h.started.includes('draft'), 'draft started');
+  h.llm.release((p) => p === 'D:x');
+  // side is still running when the gate sends the work back, and draft goes again.
+  await until(() => h.started.filter((id) => id === 'draft').length === 2, 'draft re-runs');
+  assert.deepEqual(h.paused.map((e) => e.nodeId), ['gate']);
+  h.llm.release((p) => p === 'D:x');
+  await until(() => h.started.filter((id) => id === 'side').length === 2, 'side re-runs');
+  await until(() => h.paused.length === 2, 'the gate asks again');
+
+  // The fresh side finishes first and the stale one last — the order that
+  // would overwrite fresh with stale, were the stale run allowed to decide.
+  h.llm.release((p) => p.endsWith('|again'));
+  await until(() => h.completed.filter((c) => c.nodeId === 'side').length === 1, 'the fresh side finished');
+  h.llm.release();
+
+  const ctx = await run;
+  assert.equal(ctx.side.output, '<gpt-4: S:<gpt-4: D:x>|again>', 'the fresh run is what stands');
+  assert.deepEqual(ctx.out.output, ['<gpt-4: D:x>', '<gpt-4: S:<gpt-4: D:x>|again>']);
+  // Both runs of side are in the record: the stale one happened, and cost.
+  const sides = h.db.getExecutionTraces('run').filter((t) => t.nodeId === 'side');
+  assert.deepEqual(sides.map((t) => t.status), ['success', 'success']);
+});
+
+test('a gate still waiting when the work is sent back is released, and asks again with the redone content', async () => {
+  // in → draft → gateA ─pass─→ out
+  //        ↑  └→ gateB ─pass─→ out
+  //        └──────┘ fail
+  const wf = workflow(
+    'two-gates-loop',
+    [
+      node('in', 'input'),
+      prompt('draft', 'D:{{input}}|{{nodes.gateB.decision.note}}'),
+      node('gateA', 'human_gate', {}),
+      node('gateB', 'human_gate', {}),
+      node('out', 'output')
+    ],
+    [
+      edge('in', 'draft'),
+      edge('draft', 'gateA'),
+      edge('draft', 'gateB'),
+      edge('gateA', 'out', 'pass'),
+      edge('gateB', 'out', 'pass'),
+      edge('gateB', 'draft', 'fail')
+    ]
+  );
+  // gateA is left waiting; gateB sends the work back; then both approve.
+  const decide: Decide = (_event, index) =>
+    index === 0 ? undefined : index === 1 ? { verdict: 'fail', note: 'redo' } : { verdict: 'pass' };
+  const h = harness(wf, { inputs: { in: 'x' } }, decide);
+  const ctx = await h.run();
+
+  assert.deepEqual(h.paused.map((e) => e.nodeId), ['gateA', 'gateB', 'gateA', 'gateB']);
+  assert.deepEqual(h.paused.map((e) => e.revision), [0, 0, 0, 1]);
+  assert.deepEqual(h.llm.calls.map((c) => c.userPrompt), ['D:x|', 'D:x|redo']);
+  // The first gateA was released rather than left waiting on stale content,
+  // and that is in the record; the run itself did not fail over it.
+  const gateA = h.db.getExecutionTraces('run').filter((t) => t.nodeId === 'gateA');
+  assert.deepEqual(gateA.map((t) => t.status), ['error', 'success']);
+  assert.match(gateA[0].error ?? '', /Superseded/);
+  assert.equal(ctx.gateA.decision?.verdict, 'pass');
+  assert.equal(ctx.gateB.decision?.verdict, 'pass');
+  assert.deepEqual(ctx.out.output, ['<gpt-4: D:x|redo>', '<gpt-4: D:x|redo>']);
   assert.deepEqual(h.gates.pending(), []);
 });
 

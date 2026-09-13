@@ -190,5 +190,17 @@ nothing is billed.
   node's, falling further behind with every setting the prompt node grew), a
   bespoke output every consumer had to know about, and a panel that had never
   been able to configure one. What it was actually for — the calls going out
-  at once — is the executor's job, not a node's. A file that still carries
-  one fails validation with a message saying what to build instead.
+  at once — is the executor's job, not a node's, and the executor does it
+  now. A file that still carries one fails validation with a message saying
+  what to build instead.
+- **Independent nodes run at once, so a run that is sent back can have
+  stragglers.** The executor launches every node whose arrows are resolved
+  and waits on whichever finishes first, so a fan is as fast as its slowest
+  arm. When a gate sends work back while a sibling is still running, that
+  run belongs to the lap being thrown away: it is recorded when it finishes
+  (it happened, and it cost) but stores nothing and fires no arrows, and a
+  gate still waiting on the old content is failed so it asks again. A run
+  that fails stops launching, lets what is running finish, releases any
+  waiting gate, and throws the first failure once nothing is left running —
+  so the log of a failed run can show siblings finishing after the failure,
+  and a superseded gate as an error that did not fail the run.
