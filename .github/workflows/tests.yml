@@ -1,0 +1,66 @@
+name: tests
+
+# Joseki's gate: typecheck + the three test suites on every PR and every push
+# to main. Added 2026-09-13 — until then 345 tests (shared 82, server 194,
+# client 69) ran only by hand.
+#
+# GitHub-hosted on purpose, never a self-hosted runner: this repo is PUBLIC,
+# and a fork's pull request runs whatever it likes on a self-hosted machine.
+# Cost is ~1 billed minute per run (the suite itself is ~7 s; the minute is
+# checkout + four `npm ci`), and on this account public-repo minutes count
+# against the included 2,000 — measured, docs notwithstanding — so roughly
+# 100 minutes a month at the current merge pace.
+#
+# Four `npm ci`, not one: the roots are not npm workspaces. `server` and
+# `client` take @joseki/shared as `file:../shared`, so each root's install
+# links it.
+#
+# `build:shared` runs BEFORE `typecheck`, and that order is load-bearing:
+# `server` resolves @joseki/shared through shared/package.json
+# (`types: dist/index.d.ts`) and shared/dist is gitignored, so on a cold
+# checkout `tsc -p server` fails with TS2307 until shared is built. `client`
+# aliases straight to shared/src and would not care. `npm test` is safe
+# either way — shared's own test script builds first.
+#
+# Node 22: better-sqlite3 (server) is a native module; 22 is the LTS with
+# prebuilt binaries for it. Nothing in the repo pins a version.
+#
+# Trigger scoping: `push` is limited to main so a branch commit with an open
+# PR is not tested twice. cancel-in-progress is PR-only — every commit that
+# lands on main gets its own completed result.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            shared/package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+      - name: Install (four roots, no workspaces)
+        run: |
+          npm ci
+          npm ci --prefix shared
+          npm ci --prefix server
+          npm ci --prefix client
+      - name: Build shared (server's types come from its dist)
+        run: npm run build:shared
+      - name: Typecheck (per root)
+        run: npm run typecheck
+      - name: Test (shared, server, client)
+        run: npm test
