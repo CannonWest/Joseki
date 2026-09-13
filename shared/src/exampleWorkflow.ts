@@ -21,6 +21,9 @@ import type {
   HumanGateConfig,
 } from './index';
 import { DEFAULT_WORKFLOW_MODEL } from './models';
+import { EXAMPLES_FOLDER } from './folders';
+
+export const CONTENT_REVIEW_PIPELINE_ID = 'example-content-review-pipeline';
 
 // Stable IDs for deterministic Handlebars template references
 const INPUT_ID = 'example_input';
@@ -189,8 +192,9 @@ export function createExampleWorkflow(): Workflow {
   const now = Date.now();
 
   return {
-    id: 'example-content-review-pipeline',
+    id: CONTENT_REVIEW_PIPELINE_ID,
     name: 'Content Review Pipeline',
+    folder: EXAMPLES_FOLDER,
     nodes,
     edges,
     variables: {},

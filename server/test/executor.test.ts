@@ -29,7 +29,7 @@ function edge(source: string, target: string, sourceHandle?: string): WorkflowEd
 }
 
 function workflow(id: string, nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow {
-  return { id, name: id, nodes, edges, variables: {}, createdAt: 0, updatedAt: 0 };
+  return { id, name: id, folder: '', nodes, edges, variables: {}, createdAt: 0, updatedAt: 0 };
 }
 
 interface Call { model: string; systemPrompt: string; userPrompt: string; params?: ChatParams }

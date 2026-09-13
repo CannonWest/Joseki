@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Workflow, WorkflowNode, WorkflowEdge, WorkflowValidation } from '@joseki/shared';
+import type { Folder, Workflow, WorkflowNode, WorkflowEdge, WorkflowValidation } from '@joseki/shared';
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -11,12 +11,33 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
+/**
+ * A workflow with nothing on it yet, in `folder`. It exists only on the
+ * canvas until the first save, which creates it under this id.
+ */
+export function blankWorkflow(folder: string): Workflow {
+  const now = Date.now();
+  return {
+    id: `${now}`,
+    name: 'New Workflow',
+    folder,
+    nodes: [],
+    edges: [],
+    variables: {},
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 interface WorkflowState {
   workflows: Workflow[];
+  /** Every folder there is; the welcome screen counts them. */
+  folders: Folder[];
   currentWorkflow: Workflow | null;
   isLoading: boolean;
   error: string | null;
 
+  /** Reads every workflow and every folder — the counts the welcome screen shows. */
   loadWorkflows: () => Promise<void>;
   loadWorkflow: (id: string) => Promise<void>;
   setCurrentWorkflow: (workflow: Workflow | null) => void;
@@ -31,6 +52,7 @@ interface WorkflowState {
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   workflows: [],
+  folders: [],
   currentWorkflow: null,
   isLoading: false,
   error: null,
@@ -38,9 +60,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   loadWorkflows: async () => {
     set({ isLoading: true });
     try {
-      const response = await fetch('/api/workflows');
-      const workflows = await response.json();
-      set({ workflows, isLoading: false });
+      const [workflows, folders] = await Promise.all([
+        fetch('/api/workflows').then((response) => response.json() as Promise<Workflow[]>),
+        fetch('/api/folders/all').then((response) => response.json() as Promise<Folder[]>)
+      ]);
+      set({ workflows, folders, isLoading: false });
     } catch (error) {
       set({ 
         error: error instanceof Error ? error.message : 'Failed to load workflows',

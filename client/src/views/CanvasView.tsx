@@ -26,7 +26,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-import { useWorkflowStore } from '../stores/workflowStore';
+import { blankWorkflow, useWorkflowStore } from '../stores/workflowStore';
 import { useExecutionStore } from '../stores/executionStore';
 import { useSocket } from '../hooks/useSocket';
 import { NodePalette } from '../components/NodePalette';
@@ -37,6 +37,7 @@ import { labelsOf, runWhen, statusTone } from '../runs/format';
 import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
+import { OpenWorkflowDialog } from '../components/OpenWorkflowDialog';
 import { GateDecisionPanel } from '../components/GateDecisionPanel';
 import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
 import { NO_OFFSET, type Offset } from '../hooks/usePointerDrag';
@@ -48,7 +49,7 @@ import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
 import { ModelCompareNode } from '../nodes/ModelCompareNode';
 import { RoutedEdge } from '../edges/RoutedEdge';
-import { validateWorkflow, DEFAULT_BRANCH_CONDITION, DEFAULT_WORKFLOW_MODEL } from '@joseki/shared';
+import { validateWorkflow, DEFAULT_BRANCH_CONDITION, DEFAULT_WORKFLOW_MODEL, ROOT_FOLDER } from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
 const nodeTypes = {
@@ -115,6 +116,7 @@ function Flow({
   const [showRuns, setShowRuns] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
   const [showImport, setShowImport] = useState(openImportOnMount);
+  const [showOpen, setShowOpen] = useState(false);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   // Where the reviewer pushed the gate panel. Kept here rather than in the
@@ -124,7 +126,7 @@ function Flow({
   const flowWrapper = useRef<HTMLDivElement>(null);
   const { project } = useReactFlow();
   
-  const { currentWorkflow, setCurrentWorkflow, persistWorkflow } = useWorkflowStore();
+  const { currentWorkflow, setCurrentWorkflow, persistWorkflow, workflows } = useWorkflowStore();
   const {
     isExecuting,
     startExecution,
@@ -142,8 +144,16 @@ function Flow({
     setLabelOf(labelsOf(nodes));
   }, [nodes, setLabelOf]);
 
+  // The canvas takes its graph from the store when a workflow arrives, and
+  // not again for the same one: the store's copy is only as fresh as the last
+  // save, while the canvas holds the edits since. So a rename or a move
+  // written to the store — the Open dialog does that for the workflow on
+  // the canvas — updates what the next save sends without touching the
+  // graph being edited.
+  const loadedId = useRef<string | null>(null);
   useEffect(() => {
-    if (currentWorkflow) {
+    if (currentWorkflow && loadedId.current !== currentWorkflow.id) {
+      loadedId.current = currentWorkflow.id;
       setNodes(currentWorkflow.nodes.map(n => ({
         id: n.id,
         type: n.type,
@@ -404,6 +414,39 @@ function Flow({
     onOpenChat();
   }, [canvasWorkflow, setCurrentWorkflow, onOpenChat]);
 
+  // Leaving this workflow for another saves it first, the way Run and Export
+  // do — except a workflow that was never saved and has nothing on it, which
+  // would only leave an empty "New Workflow" behind. False when the save
+  // failed, in which case the canvas stays where it is with its edits.
+  const leaveCanvas = useCallback(async (): Promise<boolean> => {
+    const workflow = canvasWorkflow();
+    if (!workflow) return true;
+    const known = workflows.some((stored) => stored.id === workflow.id);
+    if (!known && workflow.nodes.length === 0) return true;
+    try {
+      await persistWorkflow(workflow);
+      return true;
+    } catch (error) {
+      setShowOpen(false);
+      showFailure(error);
+      return false;
+    }
+  }, [canvasWorkflow, workflows, persistWorkflow, showFailure]);
+
+  const handleOpenWorkflow = useCallback(async (workflow: Workflow) => {
+    if (!(await leaveCanvas())) return;
+    setShowOpen(false);
+    clearExecution();
+    setCurrentWorkflow(workflow);
+  }, [leaveCanvas, clearExecution, setCurrentWorkflow]);
+
+  const handleNewWorkflow = useCallback(async (folder: string) => {
+    if (!(await leaveCanvas())) return;
+    setShowOpen(false);
+    clearExecution();
+    setCurrentWorkflow(blankWorkflow(folder));
+  }, [leaveCanvas, clearExecution, setCurrentWorkflow]);
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -519,6 +562,7 @@ function Flow({
           onToggleRuns={() => setShowRuns(!showRuns)}
           showRuns={showRuns}
           onOpenChat={handleOpenChat}
+          onOpen={() => setShowOpen(true)}
           onValidate={handleValidate}
           onExport={handleExport}
           onImport={() => setShowImport(true)}
@@ -696,6 +740,15 @@ function Flow({
       )}
       {showImport && (
         <ImportModal onClose={() => setShowImport(false)} onImported={handleImported} />
+      )}
+      {showOpen && (
+        <OpenWorkflowDialog
+          initialPath={currentWorkflow?.folder ?? ROOT_FOLDER}
+          onCanvas
+          onClose={() => setShowOpen(false)}
+          onOpen={(workflow) => void handleOpenWorkflow(workflow)}
+          onNew={(folder) => void handleNewWorkflow(folder)}
+        />
       )}
       {runInputs && (
         <RunInputsModal

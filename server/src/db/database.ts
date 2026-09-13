@@ -8,14 +8,68 @@ import type {
   ExecutionSummary,
   ModelConfig,
   Conversation,
-  ChatMessage
+  ChatMessage,
+  Folder,
+  FolderEntry,
+  FolderListing,
+  WorkflowSummary
 } from '@joseki/shared';
-import { createExampleWorkflow, generateId } from '@joseki/shared';
+import {
+  generateId,
+  shippedExamples,
+  ancestorFolders,
+  folderName,
+  isWithinFolder,
+  normalizeFolderPath,
+  parentFolder,
+  ROOT_FOLDER
+} from '@joseki/shared';
 import { migrate, type MigrationResult } from './migrations';
 
 export type ConversationPatch = Partial<
   Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'params' | 'activeLeafId'>
 >;
+
+/** A rename or a move: either field left out is left alone. */
+export type WorkflowMetaPatch = Partial<Pick<Workflow, 'name' | 'folder'>>;
+
+export type FolderErrorCode =
+  /** Not a path a folder can have: blank, a bad segment, or the root where the root cannot go. */
+  | 'invalid_path'
+  | 'not_found'
+  /** A folder is already at that path — or at one that differs only by case. */
+  | 'exists'
+  /** The folder has something in it and the delete was not recursive. */
+  | 'not_empty'
+  /** A folder cannot be moved into itself or under one of its own descendants. */
+  | 'inside_itself';
+
+/**
+ * What a folder operation could not do, and why. The routes turn the code
+ * into a status; the message is fit to show.
+ */
+export class FolderError extends Error {
+  constructor(
+    readonly code: FolderErrorCode,
+    message: string,
+    /** For `not_empty`: what a recursive delete would take with it. */
+    readonly contents?: { workflows: number; folders: number }
+  ) {
+    super(message);
+    this.name = 'FolderError';
+  }
+}
+
+/** A path as given, made canonical — or the reason it cannot be one. */
+function canonical(path: unknown): string {
+  const result = normalizeFolderPath(path);
+  if ('error' in result) throw new FolderError('invalid_path', result.error);
+  return result.path;
+}
+
+/** The `path = X OR path is under X` test, as SQL against a column. */
+const under = (column: string) =>
+  `(${column} = ? OR substr(${column}, 1, length(?) + 1) = ? || '/')`;
 
 export class Database {
   private db: DatabaseBetter.Database;
@@ -154,12 +208,10 @@ export class Database {
       this.insertDefaultModels();
     }
 
-    // Insert example workflow if no workflows exist
-    const workflowCount = this.db.prepare('SELECT COUNT(*) as count FROM workflows').get() as { count: number };
-    if (workflowCount.count === 0) {
-      const example = createExampleWorkflow();
-      this.createWorkflow(example);
-    }
+    // The example workflows are not seeded here: the baseline workflows
+    // table has no folder column, and they are placed in a folder. The
+    // migration that added folders (v4) puts them there, on a fresh database
+    // and an old one alike.
   }
 
   private insertDefaultModels() {
@@ -221,20 +273,31 @@ export class Database {
   }
 
   // Workflow operations
+
+  /**
+   * Stores the workflow where it says it lives. The folder is made if it is
+   * not there yet — every folder a workflow names is a folder that exists,
+   * and this is where that is kept true.
+   */
   createWorkflow(workflow: Workflow): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, nodes, edges, variables, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      workflow.id,
-      workflow.name,
-      JSON.stringify(workflow.nodes),
-      JSON.stringify(workflow.edges),
-      JSON.stringify(workflow.variables),
-      workflow.createdAt,
-      workflow.updatedAt
-    );
+    this.db.transaction(() => {
+      const folder = this.ensureFolder(workflow.folder);
+      this.db
+        .prepare(
+          `INSERT INTO workflows (id, name, nodes, edges, variables, created_at, updated_at, folder)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          workflow.id,
+          workflow.name,
+          JSON.stringify(workflow.nodes),
+          JSON.stringify(workflow.edges),
+          JSON.stringify(workflow.variables),
+          workflow.createdAt,
+          workflow.updatedAt,
+          folder
+        );
+    })();
   }
 
   getWorkflow(id: string): Workflow | undefined {
@@ -249,19 +312,243 @@ export class Database {
   }
 
   updateWorkflow(workflow: Workflow): void {
-    const stmt = this.db.prepare(`
-      UPDATE workflows 
-      SET name = ?, nodes = ?, edges = ?, variables = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(
-      workflow.name,
-      JSON.stringify(workflow.nodes),
-      JSON.stringify(workflow.edges),
-      JSON.stringify(workflow.variables),
-      Date.now(),
-      workflow.id
+    this.db.transaction(() => {
+      const folder = this.ensureFolder(workflow.folder);
+      this.db
+        .prepare(
+          `UPDATE workflows
+           SET name = ?, nodes = ?, edges = ?, variables = ?, updated_at = ?, folder = ?
+           WHERE id = ?`
+        )
+        .run(
+          workflow.name,
+          JSON.stringify(workflow.nodes),
+          JSON.stringify(workflow.edges),
+          JSON.stringify(workflow.variables),
+          Date.now(),
+          folder,
+          workflow.id
+        );
+    })();
+  }
+
+  /**
+   * Renames or moves a workflow without touching its graph. Neither bumps
+   * `updatedAt`: the listing orders by when a workflow was last *edited*,
+   * and a file moved is not a file changed. Undefined when no workflow has
+   * that id.
+   */
+  updateWorkflowMeta(id: string, patch: WorkflowMetaPatch): Workflow | undefined {
+    return this.db.transaction(() => {
+      const existing = this.getWorkflow(id);
+      if (!existing) return undefined;
+      const name = patch.name ?? existing.name;
+      const folder = patch.folder === undefined ? existing.folder : this.ensureFolder(patch.folder);
+      this.db.prepare('UPDATE workflows SET name = ?, folder = ? WHERE id = ?').run(name, folder, id);
+      return { ...existing, name, folder };
+    })();
+  }
+
+  /**
+   * Puts back whichever shipped examples are missing, in the Examples
+   * folder, and returns those it added. One that is present — edited or
+   * not — is left as it is, so this never overwrites anyone's work.
+   */
+  restoreExamples(): Workflow[] {
+    return this.db.transaction(() => {
+      const restored: Workflow[] = [];
+      for (const example of shippedExamples()) {
+        if (this.getWorkflow(example.id)) continue;
+        this.createWorkflow(example);
+        restored.push(example);
+      }
+      return restored;
+    })();
+  }
+
+  // ==================== Folders ====================
+  //
+  // A folder is a row keyed by its path — `Examples`, `Clients/Acme` — and
+  // the root is the empty path, never stored, always there. A workflow's
+  // `folder` column names the folder it is in. Renaming a folder rewrites
+  // the paths under it, in one statement each for folders and workflows.
+
+  /** Every folder, in path order. The root is not among them. */
+  listFolders(): Folder[] {
+    const rows = this.db.prepare('SELECT path, created_at FROM folders ORDER BY path').all() as any[];
+    return rows.map((row) => ({ path: row.path, createdAt: row.created_at }));
+  }
+
+  hasFolder(path: string): boolean {
+    if (path === ROOT_FOLDER) return true;
+    return this.db.prepare('SELECT 1 FROM folders WHERE path = ?').get(path) !== undefined;
+  }
+
+  /**
+   * Makes the folder, and any folder on the way to it that is not there yet
+   * — `mkdir -p`. Says whether the folder itself was new. The root cannot be
+   * made: it has no name to give it.
+   */
+  createFolder(path: unknown): { folder: Folder; created: boolean } {
+    const target = canonical(path);
+    if (target === ROOT_FOLDER) throw new FolderError('invalid_path', 'A folder needs a name');
+    return this.db.transaction(() => {
+      const created = this.ensureFolder(target, { report: true });
+      const row = this.db.prepare('SELECT path, created_at FROM folders WHERE path = ?').get(target) as any;
+      return { folder: { path: row.path, createdAt: row.created_at }, created };
+    })();
+  }
+
+  /**
+   * Gives the folder at `from` the path `to`, and everything under it the
+   * same change — a rename when only the last segment differs, a move when
+   * the parent does. The folders on the way to `to` are made if need be.
+   */
+  renameFolder(from: unknown, to: unknown): Folder {
+    const source = canonical(from);
+    const target = canonical(to);
+    if (source === ROOT_FOLDER) throw new FolderError('invalid_path', 'The root cannot be renamed or moved');
+    if (target === ROOT_FOLDER) throw new FolderError('invalid_path', 'A folder needs a name');
+    if (!this.hasFolder(source)) throw new FolderError('not_found', `No folder at "${source}"`);
+    if (isWithinFolder(target, source) && target !== source) {
+      throw new FolderError('inside_itself', `"${source}" cannot be moved inside itself`);
+    }
+    return this.db.transaction(() => {
+      if (target !== source) this.refuseCollision(target, source);
+      for (const ancestor of ancestorFolders(parentFolder(target))) this.insertFolder(ancestor);
+
+      // `substr(path, length(from) + 1)` is the part after the old prefix,
+      // '' for the folder itself and '/…' for everything under it.
+      this.db
+        .prepare(`UPDATE folders SET path = ? || substr(path, length(?) + 1) WHERE ${under('path')}`)
+        .run(target, source, source, source, source);
+      this.db
+        .prepare(`UPDATE workflows SET folder = ? || substr(folder, length(?) + 1) WHERE ${under('folder')}`)
+        .run(target, source, source, source, source);
+
+      const row = this.db.prepare('SELECT path, created_at FROM folders WHERE path = ?').get(target) as any;
+      return { path: row.path, createdAt: row.created_at };
+    })();
+  }
+
+  /**
+   * Removes the folder. One with anything in it is refused unless the
+   * delete is recursive, in which case every folder under it goes, and
+   * every workflow in any of them — runs and all, as deleting a workflow
+   * always does. Returns what went.
+   */
+  deleteFolder(path: unknown, options: { recursive?: boolean } = {}): { workflows: number; folders: number } {
+    const target = canonical(path);
+    if (target === ROOT_FOLDER) throw new FolderError('invalid_path', 'The root cannot be deleted');
+    if (!this.hasFolder(target)) throw new FolderError('not_found', `No folder at "${target}"`);
+
+    return this.db.transaction(() => {
+      const workflowIds = (
+        this.db.prepare(`SELECT id FROM workflows WHERE ${under('folder')}`).all(target, target, target) as any[]
+      ).map((row) => row.id as string);
+      const folders = (
+        this.db.prepare(`SELECT COUNT(*) AS n FROM folders WHERE ${under('path')}`).get(target, target, target) as any
+      ).n - 1;
+
+      if (!options.recursive && (workflowIds.length > 0 || folders > 0)) {
+        throw new FolderError(
+          'not_empty',
+          `"${target}" is not empty: it holds ${describeContents(workflowIds.length, folders)}`,
+          { workflows: workflowIds.length, folders }
+        );
+      }
+
+      for (const id of workflowIds) this.deleteWorkflow(id);
+      this.db.prepare(`DELETE FROM folders WHERE ${under('path')}`).run(target, target, target);
+      return { workflows: workflowIds.length, folders };
+    })();
+  }
+
+  /**
+   * One level of the tree: the folders directly inside `path`, each with
+   * what it holds all the way down, and the workflows directly in it, most
+   * recently edited first. Undefined when there is no such folder.
+   */
+  folderListing(path: unknown): FolderListing | undefined {
+    const target = canonical(path);
+    if (!this.hasFolder(target)) return undefined;
+
+    // Counts come from one pass over every folder and every workflow's
+    // folder — the tree is small, and this keeps the listing to three reads.
+    const all = this.listFolders();
+    const perFolder = new Map<string, number>();
+    for (const row of this.db.prepare('SELECT folder, COUNT(*) AS n FROM workflows GROUP BY folder').all() as any[]) {
+      perFolder.set(row.folder, row.n);
+    }
+    const children: FolderEntry[] = all
+      .filter((folder) => parentFolder(folder.path) === target)
+      .map((folder) => {
+        let workflowCount = 0;
+        for (const [inFolder, n] of perFolder) if (isWithinFolder(inFolder, folder.path)) workflowCount += n;
+        const folderCount = all.filter((f) => f.path !== folder.path && isWithinFolder(f.path, folder.path)).length;
+        return { ...folder, name: folderName(folder.path), workflowCount, folderCount };
+      });
+
+    const workflows = (
+      this.db
+        .prepare(
+          `SELECT w.id, w.name, w.folder, w.created_at, w.updated_at,
+                  json_array_length(w.nodes) AS node_count,
+                  (SELECT COUNT(*) FROM executions e WHERE e.workflow_id = w.id) AS run_count
+             FROM workflows w
+            WHERE w.folder = ?
+            ORDER BY w.updated_at DESC`
+        )
+        .all(target) as any[]
+    ).map(
+      (row): WorkflowSummary => ({
+        id: row.id,
+        name: row.name,
+        folder: row.folder,
+        nodeCount: row.node_count,
+        runCount: row.run_count,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      })
     );
+
+    return { path: target, folders: children, workflows };
+  }
+
+  /**
+   * The folder made canonical and present, with its ancestors. Returns the
+   * canonical path; with `report`, whether the folder itself was inserted.
+   */
+  private ensureFolder(path: unknown): string;
+  private ensureFolder(path: unknown, options: { report: true }): boolean;
+  private ensureFolder(path: unknown, options?: { report: true }): string | boolean {
+    const target = canonical(path);
+    let created = false;
+    for (const ancestor of ancestorFolders(target)) created = this.insertFolder(ancestor);
+    return options?.report ? created : target;
+  }
+
+  /** One folder row, unless it is there already. True when it was inserted. */
+  private insertFolder(path: string): boolean {
+    if (this.hasFolder(path)) return false;
+    this.refuseCollision(path);
+    this.db.prepare('INSERT INTO folders (path, created_at) VALUES (?, ?)').run(path, Date.now());
+    return true;
+  }
+
+  /**
+   * Two folders whose paths differ only by case would be one folder to
+   * anyone reading a listing, so the second is refused. `except` is the
+   * folder being renamed, which may of course collide with itself.
+   */
+  private refuseCollision(path: string, except?: string): void {
+    const clash = this.db
+      .prepare('SELECT path FROM folders WHERE lower(path) = lower(?) AND path <> ?')
+      .get(path, except ?? '') as { path: string } | undefined;
+    if (clash && clash.path !== path) {
+      throw new FolderError('exists', `A folder named "${clash.path}" is already there, and names differ only by case`);
+    }
+    if (clash) throw new FolderError('exists', `A folder is already at "${clash.path}"`);
   }
 
   // Runs of the workflow go with it: better-sqlite3 enforces foreign keys,
@@ -280,6 +567,7 @@ export class Database {
     return {
       id: row.id,
       name: row.name,
+      folder: row.folder ?? ROOT_FOLDER,
       nodes: JSON.parse(row.nodes),
       edges: JSON.parse(row.edges),
       variables: JSON.parse(row.variables),
@@ -629,4 +917,12 @@ export class Database {
   close(): void {
     this.db.close();
   }
+}
+
+/** `2 workflows and 1 folder`, for a folder that could not be deleted. */
+function describeContents(workflows: number, folders: number): string {
+  const parts: string[] = [];
+  if (workflows) parts.push(`${workflows} workflow${workflows === 1 ? '' : 's'}`);
+  if (folders) parts.push(`${folders} folder${folders === 1 ? '' : 's'}`);
+  return parts.join(' and ');
 }

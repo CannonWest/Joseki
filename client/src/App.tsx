@@ -1,8 +1,13 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 
-import { useWorkflowStore } from './stores/workflowStore';
-import { createExampleWorkflow } from '@joseki/shared';
+import { blankWorkflow, useWorkflowStore } from './stores/workflowStore';
+import { useExecutionStore } from './stores/executionStore';
+import { CONTENT_REVIEW_PIPELINE_ID, ROOT_FOLDER, createExampleWorkflow } from '@joseki/shared';
+import type { Workflow } from '@joseki/shared';
 import { ViewBoundary } from './components/ViewBoundary';
+import { OpenWorkflowDialog } from './components/OpenWorkflowDialog';
+import * as api from './workflows/api';
+import { describeLibrary } from './workflows/browse';
 
 // Both heavy surfaces load on demand. The canvas pulls in reactflow, the seven
 // node components and the Monaco-backed config panel; the chat view pulls in
@@ -23,25 +28,22 @@ function ViewFallback() {
 }
 
 function App() {
-  const { loadWorkflows, workflows, setCurrentWorkflow, currentWorkflow } = useWorkflowStore();
+  const { loadWorkflows, workflows, folders, setCurrentWorkflow, currentWorkflow } = useWorkflowStore();
+  const clearExecution = useExecutionStore((state) => state.clearExecution);
   const [view, setView] = useState<'welcome' | 'canvas' | 'chat'>('welcome');
   const [importOnStart, setImportOnStart] = useState(false);
+  const [showOpen, setShowOpen] = useState(false);
 
   useEffect(() => {
     loadWorkflows();
   }, [loadWorkflows]);
 
-  const handleCreateWorkflow = () => {
-    const newWorkflow = {
-      id: `${Date.now()}`,
-      name: 'New Workflow',
-      nodes: [],
-      edges: [],
-      variables: {},
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
-    setCurrentWorkflow(newWorkflow);
+  // A new workflow goes in the root unless it was started from inside a
+  // folder in the Open dialog. Nothing is saved until the canvas saves it.
+  const handleCreateWorkflow = (folder: string = ROOT_FOLDER) => {
+    clearExecution();
+    setShowOpen(false);
+    setCurrentWorkflow(blankWorkflow(folder));
     setView('canvas');
   };
 
@@ -52,15 +54,29 @@ function App() {
     handleCreateWorkflow();
   };
 
-  const handleLoadWorkflow = (workflow: any) => {
+  const handleLoadWorkflow = (workflow: Workflow) => {
+    clearExecution();
+    setShowOpen(false);
     setCurrentWorkflow(workflow);
     setView('canvas');
   };
 
-  const handleLoadExample = () => {
-    const exampleWorkflow = createExampleWorkflow();
-    setCurrentWorkflow(exampleWorkflow);
-    setView('canvas');
+  // The example as it is stored — edits and all — put back first if it has
+  // been deleted. Only if the server cannot be reached does the canvas get
+  // the copy built into the client, which saves into the Examples folder.
+  const handleLoadExample = async () => {
+    let example: Workflow | undefined;
+    try {
+      example = await api.exists(CONTENT_REVIEW_PIPELINE_ID);
+      if (!example) {
+        await api.restoreExamples();
+        example = await api.getWorkflow(CONTENT_REVIEW_PIPELINE_ID);
+        void loadWorkflows();
+      }
+    } catch {
+      example = createExampleWorkflow();
+    }
+    handleLoadWorkflow(example);
   };
 
   if (view === 'chat') {
@@ -82,7 +98,7 @@ function App() {
 
           <div className="grid grid-cols-2 gap-4 mb-8">
             <button
-              onClick={handleCreateWorkflow}
+              onClick={() => handleCreateWorkflow()}
               className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left"
             >
               <div className="text-2xl mb-2">+</div>
@@ -91,7 +107,7 @@ function App() {
             </button>
 
             <button
-              onClick={handleLoadExample}
+              onClick={() => void handleLoadExample()}
               className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-emerald-500 transition-colors text-left"
             >
               <div className="text-2xl mb-2">&#9889;</div>
@@ -100,15 +116,12 @@ function App() {
             </button>
 
             <button
-              onClick={() => handleLoadWorkflow(workflows[0])}
-              disabled={workflows.length === 0}
-              className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left disabled:opacity-50"
+              onClick={() => setShowOpen(true)}
+              className="p-6 bg-slate-900 border border-slate-800 rounded-lg hover:border-blue-500 transition-colors text-left"
             >
               <div className="text-2xl mb-2">📂</div>
               <div className="font-semibold text-white">Open Existing</div>
-              <div className="text-sm text-slate-400">
-                {workflows.length} workflow{workflows.length !== 1 ? 's' : ''}
-              </div>
+              <div className="text-sm text-slate-400">{describeLibrary(workflows.length, folders.length)}</div>
             </button>
 
             <button
@@ -140,6 +153,14 @@ function App() {
             </ol>
           </div>
         </div>
+
+        {showOpen && (
+          <OpenWorkflowDialog
+            onClose={() => setShowOpen(false)}
+            onOpen={handleLoadWorkflow}
+            onNew={handleCreateWorkflow}
+          />
+        )}
       </div>
     );
   }

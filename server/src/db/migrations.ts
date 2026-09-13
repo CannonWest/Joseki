@@ -1,4 +1,5 @@
 import type DatabaseBetter from 'better-sqlite3';
+import { EXAMPLES_FOLDER, shippedExamples } from '@joseki/shared';
 
 /**
  * Schema changes, in the order they happened.
@@ -72,6 +73,60 @@ export const migrations: Migration[] = [
       // it, so reopening a run lost which model ran each node. Traces
       // recorded before this stay null — that is missing, not wrong.
       addColumn(db, 'execution_traces', 'model', 'TEXT');
+    }
+  },
+  {
+    version: 4,
+    name: 'workflows: folders, with the shipped examples in one called Examples',
+    up(db) {
+      // A workflow names the folder it is in by path; the root is '' and is
+      // never a row. A folder is a row, so an empty one exists until it is
+      // deleted, the way an empty directory does.
+      addColumn(db, 'workflows', 'folder', "TEXT NOT NULL DEFAULT ''");
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS folders (
+           path TEXT PRIMARY KEY,
+           created_at INTEGER NOT NULL
+         )`
+      );
+      // A listing reads one folder, most recently edited first.
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_workflows_folder
+           ON workflows(folder, updated_at)`
+      );
+
+      // The shipped examples move into an Examples folder. Until now the one
+      // example was seeded whenever the table was empty, which put it at the
+      // root of every database; this is the one time it is put somewhere on
+      // its own. An example that is not there — deleted, or the newer one —
+      // is added, and one that is there keeps whatever edits it carries.
+      // Seeding lives here rather than in the baseline: the v0 table has no
+      // folder column, so a fresh database cannot take an example before
+      // this step has run.
+      const now = Date.now();
+      db.prepare('INSERT OR IGNORE INTO folders (path, created_at) VALUES (?, ?)').run(EXAMPLES_FOLDER, now);
+      const exists = db.prepare('SELECT 1 FROM workflows WHERE id = ?');
+      const move = db.prepare('UPDATE workflows SET folder = ? WHERE id = ?');
+      const insert = db.prepare(
+        `INSERT INTO workflows (id, name, nodes, edges, variables, created_at, updated_at, folder)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const example of shippedExamples()) {
+        if (exists.get(example.id)) {
+          move.run(EXAMPLES_FOLDER, example.id);
+        } else {
+          insert.run(
+            example.id,
+            example.name,
+            JSON.stringify(example.nodes),
+            JSON.stringify(example.edges),
+            JSON.stringify(example.variables),
+            example.createdAt,
+            example.updatedAt,
+            EXAMPLES_FOLDER
+          );
+        }
+      }
     }
   }
 ];

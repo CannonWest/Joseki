@@ -17,6 +17,7 @@ const edge = (id: string, source: string, target: string): WorkflowEdge => ({ id
 const workflow = (id: string, name: string, nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow => ({
   id,
   name,
+  folder: '',
   nodes,
   edges,
   variables: {},

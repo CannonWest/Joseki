@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { Database } from './db/database';
 import { workflowRoutes } from './handlers/workflows';
+import { folderRoutes } from './handlers/folders';
 import { executionRoutes } from './handlers/executions';
 import { conversationRoutes } from './handlers/conversations';
 import { modelRoutes } from './handlers/models';
@@ -50,6 +51,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/folders', folderRoutes);
 app.use('/api/executions', executionRoutes);
 app.use('/api/conversations', conversationRoutes(db, chat));
 app.use('/api/models', modelRoutes(openRouter));

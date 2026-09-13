@@ -55,9 +55,23 @@ pair, point every port and path at something else — and give the server a
 # server
 PORT=3011 DATABASE_PATH=./data/scratch.db CLIENT_URL=http://localhost:5183 npm run dev --prefix server
 
-# client — the dev proxy target is env-driven
-JOSEKI_SERVER_URL=http://localhost:3011 npx vite --port 5183
+# client — the dev proxy target is env-driven, and so is the socket
+JOSEKI_SERVER_URL=http://localhost:3011 VITE_WS_URL=ws://localhost:3011 npx vite --port 5183
 ```
+
+Both variables, not one. `JOSEKI_SERVER_URL` is where the dev server proxies
+`/api`; the socket does not go through the proxy — `useSocket` and
+`useChatSocket` connect to `VITE_WS_URL`, and its default is `ws://localhost:3001`.
+Leave it unset and the scratch client shows **Disconnected**, because the
+other session's server refuses the unexpected origin — or worse, accepts it,
+and every run the scratch client starts executes over there.
+
+Copy the database *before* touching `migrations.ts`, not after. The other
+session's `tsx watch` restarts on the save and migrates whatever database it
+holds open — the shared one — so by the time you copy it, the copy is already
+at the new version and there is nothing left to test the migration against.
+The same fact cuts the other way: a migration is live the moment it is
+written, so write it whole. A half-finished one that throws stops that server.
 
 ## Testing through the Browser pane
 
@@ -75,6 +89,15 @@ JOSEKI_SERVER_URL=http://localhost:3011 npx vite --port 5183
 - A click on a canvas node sometimes only selects it and sometimes opens its
   config panel. In a batch, probe for the `Node Configuration` heading
   between clicks rather than assuming which one you got.
+- Send `Enter`, not `Return`, to commit an inline edit in the Open dialog:
+  the key name `Return` reached the input as something other than `Enter`
+  and committed nothing, while clicking Save did. A `type` right after the
+  click that mounts an input can also land before the input has focus — a
+  half-second `wait` between them, or `form_input` on the field, is steadier.
+- With the pane hidden the window is 0×0 and `read_page` comes back empty
+  even though the page is fine. `get_page_text` still works, and so does
+  driving the page from `javascript_tool`; the dialog's rows carry
+  `data-testid="folder-row"` / `"workflow-row"` for exactly that.
 
 ## Smoke scripts
 
@@ -132,6 +155,18 @@ nothing is billed.
   lazy boundary breaks the canvas.
 - **Schema changes go in `server/src/db/migrations.ts`**, never into a
   `CREATE TABLE` in `database.ts` — see *Schema changes* in the README.
+- **The example workflows are seeded by migration v4, not by `initTables`.**
+  The v0 `workflows` table has no `folder` column, and `createWorkflow` writes
+  one — so a seed in the frozen baseline would throw on every fresh database
+  before the migrations had run. Anything seeded into a column a migration
+  added has to be seeded at or after that migration. There is also no
+  seed-on-start: an example deleted stays deleted, and
+  `POST /api/workflows/examples/restore` is the way back.
+- **Folders are keyed by path, and the prefix test is `substr`, not `LIKE`.**
+  `LIKE 'A/%'` would read `_` and `%` in a folder name as wildcards; the
+  `under()` helper in `database.ts` compares `substr(path, 1, length(?) + 1)`
+  to `? || '/'` instead, which is also why `AB` is never taken for a child of
+  `A`.
 - **A field on `ExecutionTrace` is not a field in the database.** `model` sat
   on the type and streamed live for months while the insert never wrote it and
   the read never looked for it, so every reopened run had lost which model ran

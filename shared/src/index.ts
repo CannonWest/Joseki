@@ -1,8 +1,9 @@
 // Shared types and utilities for Joseki
 
 import type { MergePatch } from './patch';
-import { DEFAULT_WORKFLOW_MODEL } from './models';
 export { createExampleWorkflow } from './exampleWorkflow';
+export * from './examples';
+export * from './folders';
 export * from './validate';
 export * from './chat';
 export * from './patch';
@@ -55,6 +56,12 @@ export interface WorkflowEdge {
 export interface Workflow {
   id: string;
   name: string;
+  /**
+   * The folder it lives in, as a path — `Examples`, `Clients/Acme` — or the
+   * empty string for the root, which is where a new workflow is saved. See
+   * folders.ts for the shape of a path.
+   */
+  folder: string;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   variables: Record<string, any>;
@@ -701,49 +708,4 @@ export function calculateCost(
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-export function createDefaultWorkflow(): Workflow {
-  const inputNode: WorkflowNode = {
-    id: generateId(),
-    type: 'input',
-    position: { x: 250, y: 50 },
-    data: { label: 'User Input', config: {} }
-  };
-
-  const promptNode: WorkflowNode = {
-    id: generateId(),
-    type: 'prompt',
-    position: { x: 250, y: 200 },
-    data: {
-      label: 'AI Response',
-      config: {
-        systemPrompt: 'You are a helpful assistant.',
-        userPrompt: '{{input}}',
-        model: DEFAULT_WORKFLOW_MODEL,
-        temperature: 0.7,
-        maxTokens: 2048
-      } as PromptConfig
-    }
-  };
-
-  const outputNode: WorkflowNode = {
-    id: generateId(),
-    type: 'output',
-    position: { x: 250, y: 350 },
-    data: { label: 'Output', config: {} }
-  };
-
-  return {
-    id: generateId(),
-    name: 'Hello World',
-    nodes: [inputNode, promptNode, outputNode],
-    edges: [
-      { id: generateId(), source: inputNode.id, target: promptNode.id },
-      { id: generateId(), source: promptNode.id, target: outputNode.id }
-    ],
-    variables: {},
-    createdAt: Date.now(),
-    updatedAt: Date.now()
-  };
 }

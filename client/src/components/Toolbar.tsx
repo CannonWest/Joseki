@@ -8,6 +8,7 @@ interface ToolbarProps {
   onToggleRuns: () => void;
   showRuns: boolean;
   onOpenChat: () => void;
+  onOpen: () => void;
   onValidate: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -26,6 +27,7 @@ export function Toolbar({
   onToggleRuns,
   showRuns,
   onOpenChat,
+  onOpen,
   onValidate,
   onExport,
   onImport
@@ -48,6 +50,9 @@ export function Toolbar({
 
       <div className="h-6 w-px bg-slate-800" />
 
+      <button onClick={onOpen} className={secondaryButton} title="Open another workflow, or arrange the folders">
+        Open
+      </button>
       <button onClick={onValidate} className={secondaryButton} title="Check the workflow for problems">
         Validate
       </button>

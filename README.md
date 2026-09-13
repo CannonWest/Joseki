@@ -8,6 +8,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Node Types**: Prompt, Branch, Aggregate, Human Gate, Model Compare
 - **Real-time Execution**: WebSocket streaming with live token output
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
+- **Folders**: Workflows live in folders, like files; the shipped examples come in one called Examples
 - **Model Comparison**: Compare outputs from multiple LLMs side-by-side
 - **Dark Mode**: Optimized for long coding sessions
 
@@ -57,6 +58,7 @@ joseki/
 4. **Validate**: Click **Validate** to check for problems before running
 5. **Execute**: Press `Cmd+Enter` to run the workflow (it is saved and validated first)
 6. **Share**: **Export** downloads the workflow as JSON; **Import** loads one from a file or pasted JSON
+7. **Open**: browse your workflows and folders — open, rename, move and delete them — from the welcome screen or the toolbar
 
 ## Workflow files
 
@@ -109,6 +111,37 @@ OpenRouter publishes a `:batch` variant of many models — around half price, se
 ```
 
 Joseki only makes chat completions, so `/api/models` leaves them out rather than offering a choice that could not have worked — 77 of 445 at the time of writing, every one of them with a plain sibling in the catalog. The provider's own catalog keeps them, so a workflow stored against one is still recognised. For a discount that *does* work here, set **Speed / price** to `flex`.
+
+## Folders
+
+Workflows live in folders, the way files do. **Open Existing** on the welcome screen — and **Open** in the editor toolbar — is the way in: folders to walk into, workflows to open, a breadcrumb back up, and on each row **Rename**, **Move** and **Delete**, done in the row rather than in a second dialog. **New folder** makes one where you are. **+ New workflow** starts one where you are, and that is the only way a workflow starts anywhere but the top level: **Create New Workflow** on the welcome screen and **Import** both save to the root.
+
+A folder is named by its path — `Examples`, `Clients/Acme` — and the root is the empty path. A folder is a row of its own, so an empty one stays until it is deleted; a workflow names the folder it is in, and a folder a workflow is saved into is made if it is not there yet. A name cannot contain a slash, and two folders in one place cannot differ only by case.
+
+Renaming or moving a folder carries everything under it. Renaming or moving a workflow is not an edit — the listing orders workflows by when they were last edited, and a file moved is not a file changed. Deleting a folder that holds anything asks first and says what goes: every folder under it, every workflow in any of them and, as always when a workflow is deleted, their runs.
+
+Opening another workflow from the editor saves the one on the canvas first, the way Run and Export do — unless it was never saved and has nothing on it, which would only leave an empty *New Workflow* behind.
+
+### Examples
+
+The `Examples` folder holds what Joseki ships: the **Content Review Pipeline** — input → draft → quality branch → revision → merge → editor gate → output, the one **Try Example** opens — and the **Translation Round-Trip** — input → French → back to English → spot the drift → output. The round trip is a straight line with no gate, so it also runs from chat: `run_workflow` with `"Examples/Translation Round-Trip"` and an `English Text` input. Its three prompts show the two ways a prompt reads what came before it, `{{input}}` for the arrow in and `{{nodes.<id>.output}}` for any node at all.
+
+They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start. **Restore** in the Open dialog's footer puts back whichever are missing, and **Try Example** does the same for the pipeline before opening it; neither touches an example that is there.
+
+### API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/folders?path=` | GET | One level of the tree: the folders directly inside, each with what it holds all the way down, and the workflows directly in it, most recently edited first. The root when `path` is empty; `404` for a folder that is not there |
+| `/api/folders/all` | GET | Every folder, in path order |
+| `/api/folders` | POST | `{ path }` — makes the folder and any missing folder above it. `201` when new, `200` when it was there; `409` for a name that differs only by case from a folder already there |
+| `/api/folders` | PATCH | `{ path, newPath }` — rename or move, with everything under it. `400` for a move into itself, `404` for a folder that is not there, `409` for a path already taken |
+| `/api/folders?path=&recursive=` | DELETE | Removes an empty folder; with `recursive=true`, a full one and everything in it. Without it a full folder answers `409` with `contents: { workflows, folders }` |
+| `/api/workflows/:id` | PATCH | `{ name?, folder? }` — rename or move a workflow without sending its graph. `404` for an unknown id; unlike `PUT`, never a create |
+| `/api/workflows/import?folder=` | POST | Import into a folder. The file's own `folder` is ignored — that was a folder on the machine it came from |
+| `/api/workflows/examples/restore` | POST | Puts back the shipped examples that are missing, in `Examples`; `{ restored }` names them |
+
+A workflow carries `folder` wherever it goes — `GET`, `PUT`, export. `POST /api/workflows` and a creating `PUT` take one, the root when it is left out; `PUT` on an existing workflow leaves the folder alone unless the body names one. The chat tools see folders too: `list_workflows` says which folder each workflow is in, and `run_workflow` takes `Folder/Name` as well as a name or an id.
 
 ## Branching
 
@@ -257,8 +290,8 @@ The model can call tools during a turn. The loop runs up to 8 provider calls, ex
 
 | Tool | What it does |
 |------|--------------|
-| `list_workflows` | The stored workflows with their ids, node counts and input-node names |
-| `run_workflow` | Runs a stored workflow by name or id — `inputs` is an object keyed by input-node name — and returns its output plus a per-node roll-call |
+| `list_workflows` | The stored workflows with their folders, ids, node counts and input-node names |
+| `run_workflow` | Runs a stored workflow by name, `Folder/Name` or id — `inputs` is an object keyed by input-node name — and returns its output plus a per-node roll-call |
 | `calculate` | Evaluates an arithmetic expression |
 | `current_time` | The current time in UTC and, optionally, an IANA time zone |
 

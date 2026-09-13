@@ -19,10 +19,14 @@ const describeInputs = (workflow: Workflow): string => {
   return names.length ? names.join(', ') : 'none';
 };
 
+/** `Examples/Content Review Pipeline` — the name with its folder in front, when it has one. */
+const workflowPath = (workflow: Workflow): string =>
+  workflow.folder ? `${workflow.folder}/${workflow.name}` : workflow.name;
+
 export const listWorkflows: ToolDefinition = {
   name: 'list_workflows',
   description:
-    'List the stored Joseki workflows: name, id, node count and the names of their input nodes (the keys run_workflow expects).',
+    'List the stored Joseki workflows: name, the folder it is in, id, node count and the names of their input nodes (the keys run_workflow expects).',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   async execute(_args, { db }) {
     const workflows = db.getAllWorkflows();
@@ -31,7 +35,8 @@ export const listWorkflows: ToolDefinition = {
       const types = new Map<string, number>();
       for (const node of workflow.nodes) types.set(node.type, (types.get(node.type) ?? 0) + 1);
       const summary = [...types.entries()].map(([type, n]) => (n > 1 ? `${type} ×${n}` : type)).join(', ');
-      return `- "${workflow.name}" (id ${workflow.id}; ${workflow.nodes.length} nodes: ${summary}; inputs: ${describeInputs(workflow)})`;
+      const where = workflow.folder ? `in ${workflow.folder}; ` : '';
+      return `- "${workflow.name}" (${where}id ${workflow.id}; ${workflow.nodes.length} nodes: ${summary}; inputs: ${describeInputs(workflow)})`;
     });
     return ok(`${workflows.length} workflow(s):\n${lines.join('\n')}`);
   }
@@ -40,11 +45,11 @@ export const listWorkflows: ToolDefinition = {
 export const runWorkflow: ToolDefinition = {
   name: 'run_workflow',
   description:
-    'Run a stored Joseki workflow and return what it produced. Give the workflow by name or id, and its inputs as an object keyed by input-node name (see list_workflows). Prompt nodes call the configured LLM; a node that fails is reported, not fatal.',
+    'Run a stored Joseki workflow and return what it produced. Give the workflow by name, by its folder and name ("Examples/Translation Round-Trip"), or by id, and its inputs as an object keyed by input-node name (see list_workflows). Prompt nodes call the configured LLM; a node that fails is reported, not fatal.',
   parameters: {
     type: 'object',
     properties: {
-      workflow: { type: 'string', description: 'Workflow name (exact, case-insensitive) or id' },
+      workflow: { type: 'string', description: 'Workflow name (exact, case-insensitive), folder/name, or id' },
       inputs: {
         type: 'object',
         description: 'Values for the workflow\'s input nodes, keyed by input-node name (or id). Inputs left out are empty.',
@@ -61,7 +66,7 @@ export const runWorkflow: ToolDefinition = {
 
     const workflow = findWorkflow(db.getAllWorkflows(), ref);
     if (!workflow) {
-      const names = db.getAllWorkflows().map((w) => `"${w.name}"`).join(', ') || 'none';
+      const names = db.getAllWorkflows().map((w) => `"${workflowPath(w)}"`).join(', ') || 'none';
       return fail(`No workflow named or with id "${ref}". Stored workflows: ${names}.`, 'not_found');
     }
 
@@ -173,11 +178,18 @@ export function createDefaultRegistry(): ToolRegistry {
 
 // ==================== helpers ====================
 
+/**
+ * By id first; then by name; then, when the reference has a slash in it, by
+ * folder and name — `Examples/Translation Round-Trip` — so two workflows
+ * called the same thing in different folders can each be asked for.
+ */
 function findWorkflow(workflows: Workflow[], ref: string): Workflow | undefined {
   const byId = workflows.find((workflow) => workflow.id === ref);
   if (byId) return byId;
   const wanted = ref.toLowerCase();
-  return workflows.find((workflow) => workflow.name.toLowerCase() === wanted);
+  const byName = workflows.find((workflow) => workflow.name.toLowerCase() === wanted);
+  if (byName) return byName;
+  return workflows.find((workflow) => workflowPath(workflow).toLowerCase() === wanted);
 }
 
 /** Pre-fill the execution context so each input node yields its value. */

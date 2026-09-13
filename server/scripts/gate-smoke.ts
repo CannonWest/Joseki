@@ -30,7 +30,8 @@ const draft: Omit<Workflow, 'id' | 'createdAt' | 'updatedAt'> = {
     { id: 'e3', source: 'review', target: 'final', sourceHandle: 'pass' },
     { id: 'e4', source: 'review', target: 'combine', sourceHandle: 'fail' }
   ],
-  variables: {}
+  variables: {},
+  folder: ''
 };
 
 async function main() {
