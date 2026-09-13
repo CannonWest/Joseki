@@ -44,7 +44,6 @@ coverage/
 .cache/
 temp/
 tmp/
-client/package-lock.json
 
 # Claude Code tooling
 .claude/
