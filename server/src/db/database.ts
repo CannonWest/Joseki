@@ -325,9 +325,9 @@ export class Database {
 
   createExecutionTrace(trace: ExecutionTrace & { executionId: string; nodeId: string }): void {
     const stmt = this.db.prepare(`
-      INSERT INTO execution_traces 
-      (id, execution_id, node_id, input, output, token_usage, cost, latency_ms, status, error, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO execution_traces
+      (id, execution_id, node_id, input, output, token_usage, cost, latency_ms, status, error, timestamp, detail, model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       // runId is the execution id, shared by every node in the run — it
@@ -342,7 +342,11 @@ export class Database {
       trace.latencyMs,
       trace.status,
       trace.error || null,
-      trace.timestamp
+      trace.timestamp,
+      // A node with nothing to decide stores null rather than an empty object,
+      // so "no detail" and "detail that says nothing" read the same way back.
+      trace.detail ? JSON.stringify(trace.detail) : null,
+      trace.model || null
     );
   }
 
@@ -435,7 +439,11 @@ export class Database {
       cost: row.cost,
       latencyMs: row.latency_ms,
       status: row.status,
-      error: row.error ?? undefined
+      error: row.error ?? undefined,
+      // Null on a node with nothing to decide, and on every trace recorded
+      // before the columns existed.
+      detail: row.detail ? JSON.parse(row.detail) : undefined,
+      model: row.model ?? undefined
     };
   }
 

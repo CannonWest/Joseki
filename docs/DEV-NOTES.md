@@ -125,6 +125,18 @@ nothing is billed.
   lazy boundary breaks the canvas.
 - **Schema changes go in `server/src/db/migrations.ts`**, never into a
   `CREATE TABLE` in `database.ts` — see *Schema changes* in the README.
+- **A field on `ExecutionTrace` is not a field in the database.** `model` sat
+  on the type and streamed live for months while the insert never wrote it and
+  the read never looked for it, so every reopened run had lost which model ran
+  each node. When adding to the trace, follow it through
+  `createExecutionTrace` *and* `parseExecutionTrace`, and add a migration —
+  three places, and the type checker flags none of them.
+- **What the log says about a run has to be recorded with the run.** The log is
+  rebuilt from traces, so a branch's condition is stored in `detail` when it
+  runs. Reading it off the canvas instead would make an old run report the
+  condition the branch has *now* — a decision it never took. Labels are the
+  deliberate exception: they are looked up live so a renamed node stays
+  findable.
 - **Runs start over socket.io only** (`execution:start`). There is no REST
   starter, deliberately: it is the path that streams node events and pauses at
   human gates.

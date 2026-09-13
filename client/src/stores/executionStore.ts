@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { traceLine, traceTone } from '../runs/format';
+import { byId, traceLine, traceTone, type LabelOf } from '../runs/format';
 import type {
   ExecutionDetail,
   ExecutionPausedEvent,
@@ -26,7 +26,14 @@ interface ExecutionState {
    * it is looking at the past.
    */
   viewingRun: ExecutionDetail | null;
+  /**
+   * Names the nodes in the log. The canvas keeps this in step with what is on
+   * it, so the log reads in labels rather than the `prompt-1757…` ids the
+   * canvas mints.
+   */
+  labelOf: LabelOf;
 
+  setLabelOf: (labelOf: LabelOf) => void;
   startExecution: (executionId: string) => void;
   endExecution: (outcome?: 'success' | 'error') => void;
   setNodeStatus: (nodeId: string, status: ExecutionStatus, trace?: ExecutionTrace) => void;
@@ -52,8 +59,14 @@ export function nodeStatesFromTraces(
   return states;
 }
 
-/** The run's story, as the log panel shows it: one line per node attempt. */
-export function logsFromRun(run: ExecutionDetail): ExecutionState['logs'] {
+/**
+ * The run's story, as the log panel shows it: one line per node attempt.
+ *
+ * `labelOf` names the nodes. It reads the canvas as it is now, not as it was
+ * — a renamed node is still findable — while what each node *decided* comes
+ * from the trace, so the story itself is the run's own.
+ */
+export function logsFromRun(run: ExecutionDetail, labelOf: LabelOf = byId): ExecutionState['logs'] {
   const logs: ExecutionState['logs'] = [
     {
       timestamp: run.startedAt,
@@ -65,7 +78,7 @@ export function logsFromRun(run: ExecutionDetail): ExecutionState['logs'] {
   for (const trace of run.traces) {
     logs.push({
       timestamp: trace.timestamp,
-      message: traceLine(trace.nodeId, trace),
+      message: traceLine(trace.nodeId, trace, labelOf),
       type: traceTone(trace)
     });
   }
@@ -87,13 +100,16 @@ export function logsFromRun(run: ExecutionDetail): ExecutionState['logs'] {
   return logs;
 }
 
-export const useExecutionStore = create<ExecutionState>((set) => ({
+export const useExecutionStore = create<ExecutionState>((set, get) => ({
   isExecuting: false,
   currentExecutionId: null,
   nodeStates: new Map(),
   logs: [],
   pendingGate: null,
   viewingRun: null,
+  labelOf: byId,
+
+  setLabelOf: (labelOf) => set({ labelOf }),
 
   // A new run replaces whatever was on the canvas, including a run reopened
   // from history.
@@ -171,7 +187,7 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       nodeStates: nodeStatesFromTraces(run.traces),
       pendingGate: null,
       viewingRun: run,
-      logs: logsFromRun(run)
+      logs: logsFromRun(run, get().labelOf)
     });
   },
 

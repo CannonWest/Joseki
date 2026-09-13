@@ -172,6 +172,21 @@ Picking a run puts it back on the canvas: every node that ran shows the status a
 
 A node a human gate sent back ran more than once, and the history keeps every attempt rather than collapsing them — that is why a run can list more attempts than nodes. On the canvas each node shows its **last** attempt, which is the state the run ended in; the log shows the sequence.
 
+### What the log says
+
+A node that decided something says what it decided, rather than only that it finished:
+
+```
+Draft Summary — success · 20.6s
+Quality Check → true · length(input) > 500
+Revision skipped — Quality Check went the other way
+Editor Review approved, with edits — "trimmed the intro" · 39.1s
+```
+
+Nodes read by their **labels**, looked up on the canvas as it is now — so a node renamed since still matches what you see, and one deleted since keeps its id, the only name left for it. What each node *decided*, though, is recorded with the run: a branch's condition is stored as it was written when the run happened, so editing the branch afterwards never rewrites what an old run says it decided on.
+
+A run recorded before this shipped reads back without the branch and skip detail, which was never written down for it — the gate decisions and the labels still show, because those come from elsewhere.
+
 Runs start over socket.io (`execution:start`), which is the only way to start one — it is the path that streams node events and pauses at human gates.
 
 ### API

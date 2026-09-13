@@ -29,9 +29,14 @@ export function useSocket() {
       console.log('Socket disconnected');
     });
 
+    // Read at event time rather than captured: the canvas keeps the lookup in
+    // step with itself, and a name that changed mid-run should not be stale
+    // here.
+    const labelOf = (nodeId: string) => useExecutionStore.getState().labelOf(nodeId);
+
     socket.on('execution:nodeStart', (data) => {
       setNodeStatus(data.nodeId, 'running');
-      addLog(`${data.nodeId} started`, 'info');
+      addLog(`${labelOf(data.nodeId)} started`, 'info');
     });
 
     // A node that failed and is about to try again reports the failure here,
@@ -39,7 +44,7 @@ export function useSocket() {
     // reads the same as the one a reopened run is rebuilt from.
     socket.on('execution:nodeComplete', (data: { nodeId: string; trace: ExecutionTrace }) => {
       setNodeStatus(data.nodeId, data.trace.status, data.trace);
-      addLog(traceLine(data.nodeId, data.trace), traceTone(data.trace));
+      addLog(traceLine(data.nodeId, data.trace, labelOf), traceTone(data.trace));
     });
 
     socket.on('execution:token', (data) => {
@@ -50,7 +55,8 @@ export function useSocket() {
       setNodeStatus(event.nodeId, 'paused');
       setPendingGate(event);
       addLog(
-        `Waiting at ${event.nodeId} for a decision (sent back ${event.revision} of ${event.maxRevisions} times so far)`,
+        `Waiting at ${labelOf(event.nodeId)} for a decision ` +
+        `(sent back ${event.revision} of ${event.maxRevisions} times so far)`,
         'info'
       );
     });
@@ -59,7 +65,7 @@ export function useSocket() {
       if (data.ok) {
         setPendingGate(null);
       } else {
-        addLog(`Could not resume at ${data.nodeId}: ${data.error}`, 'error');
+        addLog(`Could not resume at ${labelOf(data.nodeId)}: ${data.error}`, 'error');
       }
     });
 

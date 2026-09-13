@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ExecutionDetail } from '@joseki/shared';
-import { runCost, runDuration, runShape, runWhen, statusTone, traceLine, traceTone } from '../src/runs/format';
+import { labelsOf, runCost, runDuration, runShape, runWhen, statusTone, traceLine, traceTone } from '../src/runs/format';
 import { logsFromRun, nodeStatesFromTraces } from '../src/stores/executionStore';
 
 function trace(nodeId: string, timestamp: number, overrides: Partial<ExecutionDetail['traces'][number]> = {}) {
@@ -165,4 +165,108 @@ test('each outcome gets its own tone, and an unknown one falls back', () => {
   assert.notEqual(statusTone('success'), statusTone('error'));
   assert.notEqual(statusTone('paused'), statusTone('running'));
   assert.equal(statusTone('pending'), statusTone('skipped'));
+});
+
+// ==================== what a node decided ====================
+
+test('a branch says which arrow fired and on what condition', () => {
+  const branch = trace('example_quality_check', 10, {
+    output: 'true',
+    latencyMs: 0,
+    detail: { condition: 'length(input) > 500', handle: 'true' }
+  });
+  assert.equal(
+    traceLine('example_quality_check', branch),
+    'example_quality_check → true · length(input) > 500'
+  );
+});
+
+test('the condition it reports is the run\'s own, not the one on the canvas now', () => {
+  // Recorded with the trace for exactly this reason: editing the branch
+  // afterwards must not rewrite what an old run says it decided.
+  const branch = trace('b', 10, { latencyMs: 0, detail: { condition: '1 == 0', handle: 'false' } });
+  assert.match(traceLine('b', branch), /1 == 0/);
+});
+
+test('a branch with no condition recorded still says which way it went', () => {
+  const branch = trace('b', 10, { latencyMs: 0, detail: { handle: 'false' } });
+  assert.equal(traceLine('b', branch), 'b → false');
+});
+
+test('a skipped node names what went the other way', () => {
+  const skipped = trace('revision', 10, {
+    status: 'skipped',
+    detail: { skippedBy: ['example_quality_check'] }
+  });
+  assert.equal(
+    traceLine('revision', skipped),
+    'revision skipped — example_quality_check went the other way'
+  );
+});
+
+test('several nodes that skipped a path read as a list', () => {
+  const skipped = trace('join', 10, { status: 'skipped', detail: { skippedBy: ['a', 'b', 'c'] } });
+  assert.equal(traceLine('join', skipped), 'join skipped — a, b and c went the other way');
+});
+
+test('a run recorded before detail existed still reads', () => {
+  const skipped = trace('unused', 10, { status: 'skipped' });
+  assert.equal(traceLine('unused', skipped), 'unused skipped: its path was not taken');
+});
+
+test('a gate says what the reviewer decided, and their note', () => {
+  const approved = trace('gate', 10, { input: { decision: { verdict: 'pass' } } });
+  assert.equal(traceLine('gate', approved), 'gate approved · 1.5s');
+
+  const edited = trace('gate', 10, {
+    input: { decision: { verdict: 'pass', edited: 'a tidier draft', note: 'trimmed the intro' } }
+  });
+  assert.equal(traceLine('gate', edited), 'gate approved, with edits — "trimmed the intro" · 1.5s');
+
+  const sentBack = trace('gate', 10, {
+    input: { decision: { verdict: 'fail', note: 'too long; keep to two paragraphs' } }
+  });
+  assert.equal(
+    traceLine('gate', sentBack),
+    'gate sent back — "too long; keep to two paragraphs" · 1.5s'
+  );
+});
+
+test('a gate that has not been decided yet is not reported as one that has', () => {
+  const waiting = trace('gate', 10, { input: { inputs: {}, nodes: {} } });
+  assert.equal(traceLine('gate', waiting), 'gate — success · 1.5s');
+});
+
+// ==================== names ====================
+
+test('the log reads in labels, and falls back to the id for a node that is gone', () => {
+  const labelOf = labelsOf([
+    { id: 'example_quality_check', data: { label: 'Quality Check' } },
+    { id: 'revision', data: { label: 'Revision' } }
+  ]);
+
+  const branch = trace('example_quality_check', 10, {
+    latencyMs: 0,
+    detail: { condition: 'length(input) > 500', handle: 'true' }
+  });
+  assert.equal(
+    traceLine('example_quality_check', branch, labelOf),
+    'Quality Check → true · length(input) > 500'
+  );
+
+  const skipped = trace('revision', 10, {
+    status: 'skipped',
+    detail: { skippedBy: ['example_quality_check'] }
+  });
+  assert.equal(traceLine('revision', skipped, labelOf), 'Revision skipped — Quality Check went the other way');
+
+  const deleted = trace('gone-1757', 10, { status: 'skipped' });
+  assert.match(traceLine('gone-1757', deleted, labelOf), /^gone-1757 skipped/);
+});
+
+test('a run reopened is told in labels too', () => {
+  const labelOf = labelsOf([{ id: 'draft', data: { label: 'Draft' } }]);
+  const logs = logsFromRun(detail(), labelOf);
+  assert.ok(logs.some((l) => l.message.startsWith('Draft — success')));
+  assert.equal(logs.some((l) => l.message.startsWith('draft —')), false);
 });

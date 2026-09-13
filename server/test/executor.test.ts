@@ -573,3 +573,64 @@ test('sending the example back re-drafts with the note, and the second approval 
   assert.equal(ctx.example_output.output, ctx.example_merge.output);
   assert.equal(h.completed.at(-1)?.nodeId, 'example_output');
 });
+
+// ==================== what a run records about its decisions ====================
+//
+// These read the traces back out of SQLite rather than off the events, so they
+// cover the write and the read as well as what the executor decided to record.
+
+test('a branch records the condition it decided on and the arrow it fired', async () => {
+  const h = harness(forked('length(input) > 500'), { inputs: { in: 'x'.repeat(640) } });
+  await h.run();
+
+  const traces = h.db.getExecutionTraces('run');
+  assert.deepEqual(traces.find((t) => t.nodeId === 'branch')?.detail, {
+    condition: 'length(input) > 500',
+    handle: 'true'
+  });
+});
+
+test('a node that never ran records which node went the other way', async () => {
+  const h = harness(forked('input == "go"'), { inputs: { in: 'stop' } });
+  await h.run();
+
+  const skipped = h.db.getExecutionTraces('run').find((t) => t.nodeId === 'yes');
+  assert.equal(skipped?.status, 'skipped');
+  assert.deepEqual(skipped?.detail, { skippedBy: ['branch'] });
+});
+
+test('a branch with no condition set records the true it defaulted to', async () => {
+  const wf = forked('');
+  const h = harness(wf, { inputs: { in: 'anything' } });
+  await h.run();
+
+  assert.deepEqual(h.db.getExecutionTraces('run').find((t) => t.nodeId === 'branch')?.detail, {
+    condition: 'true',
+    handle: 'true'
+  });
+});
+
+test('a gate records the handle the reviewer sent it down', async () => {
+  const h = harness(gated(), {}, pass);
+  await h.run();
+
+  const gate = h.db.getExecutionTraces('run').find((t) => t.nodeId === 'gate');
+  assert.deepEqual(gate?.detail, { handle: 'pass' });
+  // The decision itself has been recorded as the gate's input since before
+  // traces carried a detail, and still is.
+  assert.equal(gate?.input.decision.verdict, 'pass');
+});
+
+test('the model a node ran on survives the write', async () => {
+  const h = harness(linear(), { inputs: { in: 'the article' } });
+  await h.run();
+
+  assert.equal(h.db.getExecutionTraces('run').find((t) => t.nodeId === 'draft')?.model, 'gpt-4');
+});
+
+test('a node with nothing to decide records no detail at all', async () => {
+  const h = harness(linear(), { inputs: { in: 'the article' } });
+  await h.run();
+
+  assert.equal(h.db.getExecutionTraces('run').find((t) => t.nodeId === 'draft')?.detail, undefined);
+});

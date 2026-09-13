@@ -220,6 +220,30 @@ export interface TokenUsage {
   total: number;
 }
 
+/**
+ * What a node decided, recorded alongside what it produced.
+ *
+ * A run's log is rebuilt from its traces, so anything the log wants to say
+ * about *why* a run went the way it did has to be written down when it
+ * happens. Reading it off the canvas instead would mean a run made before you
+ * edited a condition reads back with the condition you have now — the log
+ * would describe a decision the run never took.
+ *
+ * Presentation is the exception: a node's label is looked up live, so a
+ * renamed node is still findable on the canvas from an old run's log.
+ */
+export interface TraceDetail {
+  /** Branch: the condition as it was written when the run happened. */
+  condition?: string;
+  /** The output handle the node chose — a branch's true/false, a gate's pass/fail. */
+  handle?: string;
+  /**
+   * Skipped: the upstream nodes whose arrows into this one died, so the log
+   * can name what took the other path instead of only saying one was taken.
+   */
+  skippedBy?: string[];
+}
+
 export interface ExecutionTrace {
   runId: string;
   timestamp: number;
@@ -232,6 +256,8 @@ export interface ExecutionTrace {
   error?: string;
   parentBranchId?: string;
   model?: string;
+  /** Why the node went the way it did. Absent on a node with nothing to decide. */
+  detail?: TraceDetail;
 }
 
 export interface ExecutionContext {

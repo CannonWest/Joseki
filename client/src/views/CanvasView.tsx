@@ -33,7 +33,7 @@ import { NodePalette } from '../components/NodePalette';
 import { NodeConfigPanel } from '../components/NodeConfigPanel';
 import { ExecutionLogPanel } from '../components/ExecutionLogPanel';
 import { RunHistoryPanel } from '../components/RunHistoryPanel';
-import { runWhen, statusTone } from '../runs/format';
+import { labelsOf, runWhen, statusTone } from '../runs/format';
 import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
@@ -121,9 +121,22 @@ function Flow({
   const { project } = useReactFlow();
   
   const { currentWorkflow, setCurrentWorkflow, persistWorkflow } = useWorkflowStore();
-  const { isExecuting, startExecution, currentExecutionId, pendingGate, viewingRun, clearExecution } =
-    useExecutionStore();
+  const {
+    isExecuting,
+    startExecution,
+    currentExecutionId,
+    pendingGate,
+    viewingRun,
+    clearExecution,
+    setLabelOf
+  } = useExecutionStore();
   const { socket, isConnected, resumeGate, cancelExecution } = useSocket();
+
+  // The log names nodes the way the canvas does, so a rename shows up in it
+  // at once — including in a run reopened from history.
+  useEffect(() => {
+    setLabelOf(labelsOf(nodes));
+  }, [nodes, setLabelOf]);
 
   useEffect(() => {
     if (currentWorkflow) {

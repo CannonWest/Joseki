@@ -143,3 +143,51 @@ test('migrations must be whole numbers in ascending order', () => {
   assert.equal(new Set(shipped).size, shipped.length);
   assert.equal(LATEST_VERSION, shipped[shipped.length - 1]);
 });
+
+test('a run recorded before v3 still reads, with the new columns empty', () => {
+  const { file, cleanup } = tempDb('pre-v3.db');
+
+  // The traces table as it stood before v3, holding a branch's run. Opening
+  // it through Database is what a real upgrade does: initTables leaves the
+  // existing table alone, then the migrations bring it up.
+  const older = new BetterSqlite3(file);
+  older.exec(`
+    CREATE TABLE execution_traces (
+      id TEXT PRIMARY KEY, execution_id TEXT NOT NULL, node_id TEXT NOT NULL,
+      input TEXT NOT NULL, output TEXT NOT NULL, token_usage TEXT, cost REAL,
+      latency_ms INTEGER, status TEXT NOT NULL, error TEXT, timestamp INTEGER NOT NULL
+    );
+    INSERT INTO execution_traces
+      (id, execution_id, node_id, input, output, token_usage, cost, latency_ms, status, timestamp)
+      VALUES ('t1', 'run-old', 'branch', 'null', '"true"', '{}', 0, 0, 'success', 1);
+  `);
+  older.close();
+
+  const db = new Database(file);
+  assert.equal(db.schema.to, LATEST_VERSION);
+
+  const [trace] = db.getExecutionTraces('run-old');
+  assert.equal(trace.nodeId, 'branch');
+  assert.equal(trace.output, 'true', 'what it recorded is untouched');
+  // Missing rather than wrong: the run happened before either was written.
+  assert.equal(trace.detail, undefined);
+  assert.equal(trace.model, undefined);
+  db.close();
+
+  cleanup();
+});
+
+test('v3 gives the traces table somewhere to put a decision and a model', () => {
+  const { file, cleanup } = tempDb('v3.db');
+  new Database(file).close();
+
+  const inspect = new BetterSqlite3(file, { readonly: true });
+  const columns = (inspect.prepare('PRAGMA table_info(execution_traces)').all() as Array<{ name: string }>)
+    .map((column) => column.name);
+  inspect.close();
+
+  assert.ok(columns.includes('detail'));
+  assert.ok(columns.includes('model'), 'model was on the type but never had a column');
+
+  cleanup();
+});

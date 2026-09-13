@@ -6,7 +6,8 @@ import type {
   ExecutionContext,
   ExecutionTrace,
   ExecutionPausedEvent,
-  GateDecision
+  GateDecision,
+  TraceDetail
 } from '@joseki/shared';
 import {
   asText,
@@ -270,7 +271,10 @@ export class WorkflowExecutor {
       done.add(nodeId);
 
       if (inEdges.length > 0 && takenEdges.length === 0) {
-        const trace = this.skippedTrace(executionId);
+        // Every arrow in is dead; their sources are what decided against
+        // this path. Listed once each, in arrow order.
+        const skippedBy = [...new Set(inEdges.map((e) => e.source))];
+        const trace = this.skippedTrace(executionId, skippedBy);
         this.db.createExecutionTrace({ ...trace, executionId, nodeId });
         options.onNodeComplete?.(nodeId, trace);
         resolveOutgoing(node, NO_HANDLE);
@@ -334,7 +338,12 @@ export class WorkflowExecutor {
     return context;
   }
 
-  private skippedTrace(runId: string): ExecutionTrace {
+  /**
+   * A node that never ran because every arrow into it came from a path that
+   * was not taken. `skippedBy` names the nodes those arrows came from, so the
+   * log can say what went the other way rather than only that something did.
+   */
+  private skippedTrace(runId: string, skippedBy: string[] = []): ExecutionTrace {
     return {
       runId,
       timestamp: Date.now(),
@@ -343,7 +352,8 @@ export class WorkflowExecutor {
       tokenUsage: { prompt: 0, completion: 0, total: 0 },
       cost: 0,
       latencyMs: 0,
-      status: 'skipped'
+      status: 'skipped',
+      detail: skippedBy.length ? { skippedBy } : undefined
     };
   }
 
@@ -405,6 +415,7 @@ export class WorkflowExecutor {
       let reportedCost: number | undefined;
       let selectedHandle: string | undefined;
       let decision: GateDecision | undefined;
+      let detail: TraceDetail | undefined;
 
       switch (node.type) {
         case 'prompt': {
@@ -424,6 +435,9 @@ export class WorkflowExecutor {
         case 'branch':
           output = await this.executeBranchNode(node, inputs, context);
           selectedHandle = output;
+          // The condition as it reads right now. A workflow edited later must
+          // not change what this run says it decided on.
+          detail = { condition: (node.data.config as any).condition || 'true', handle: output };
           break;
 
         case 'aggregate':
@@ -436,8 +450,11 @@ export class WorkflowExecutor {
           decision = gate.decision;
           selectedHandle = decision.verdict;
           // The decision is the reviewer's input to the gate; it belongs
-          // with the persisted trace.
+          // with the persisted trace. It has been recorded here since before
+          // `detail` existed, so the log reads it from here for every run —
+          // `detail` carries only the handle it chose.
           input.decision = decision;
+          detail = { handle: selectedHandle };
           break;
         }
 
@@ -480,7 +497,8 @@ export class WorkflowExecutor {
           cost,
           latencyMs,
           status: 'success',
-          model
+          model,
+          detail
         },
         selectedHandle,
         decision

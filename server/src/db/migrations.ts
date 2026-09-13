@@ -57,6 +57,22 @@ export const migrations: Migration[] = [
            ON execution_traces(execution_id, timestamp)`
       );
     }
+  },
+  {
+    version: 3,
+    name: 'execution_traces: what a node decided, and the model that ran it',
+    up(db) {
+      // A run's log is rebuilt from its traces, so why a run went the way it
+      // did has to be written down as it happens — a branch's condition and
+      // the handle it chose, and for a node that never ran, the nodes whose
+      // arrows into it died.
+      addColumn(db, 'execution_traces', 'detail', 'TEXT');
+      // `model` has been on the trace type and emitted live since the
+      // beginning; the insert never wrote it and the read never looked for
+      // it, so reopening a run lost which model ran each node. Traces
+      // recorded before this stay null — that is missing, not wrong.
+      addColumn(db, 'execution_traces', 'model', 'TEXT');
+    }
   }
 ];
 
