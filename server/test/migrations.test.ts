@@ -32,6 +32,16 @@ function indexesOn(file: string, table: string): string[] {
   return names;
 }
 
+function tablesIn(file: string): string[] {
+  const db = new BetterSqlite3(file, { readonly: true });
+  const names = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+    .all()
+    .map((row) => (row as { name: string }).name);
+  db.close();
+  return names;
+}
+
 test('a fresh database opens fully migrated, and opening it again applies nothing', () => {
   const { file, cleanup } = tempDb('fresh.db');
 
@@ -188,6 +198,41 @@ test('v3 gives the traces table somewhere to put a decision and a model', () => 
 
   assert.ok(columns.includes('detail'));
   assert.ok(columns.includes('model'), 'model was on the type but never had a column');
+
+  cleanup();
+});
+
+test('v5 drops the tables nothing reads, and a fresh database is never built them', () => {
+  const { file, cleanup } = tempDb('v4.db');
+
+  // A database as v4 left it: model_configs seeded with the old hand-kept
+  // models, and conversation_trees still standing.
+  const older = new BetterSqlite3(file);
+  older.exec(`
+    CREATE TABLE model_configs (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, model_id TEXT NOT NULL,
+      max_tokens INTEGER NOT NULL, pricing TEXT NOT NULL, capabilities TEXT NOT NULL
+    );
+    INSERT INTO model_configs VALUES ('gpt-4', 'GPT-4', 'openai', 'gpt-4', 8192, '{}', '[]');
+    CREATE TABLE conversation_trees (id TEXT PRIMARY KEY, nodes TEXT NOT NULL);
+  `);
+  older.pragma('user_version = 4');
+  older.close();
+
+  const db = new Database(file);
+  assert.deepEqual(db.schema.applied.map((m) => m.version), [5]);
+  db.close();
+  const left = tablesIn(file).filter((t) => t === 'model_configs' || t === 'conversation_trees');
+  assert.deepEqual(left, [], 'both tables are gone');
+
+  // And a fresh database never has them: the baseline stopped making them
+  // when the migration that drops them shipped.
+  const { file: fresh, cleanup: cleanupFresh } = tempDb('fresh.db');
+  new Database(fresh).close();
+  const tables = tablesIn(fresh);
+  assert.ok(!tables.includes('model_configs'), 'not built only to be dropped');
+  assert.ok(!tables.includes('conversation_trees'));
+  cleanupFresh();
 
   cleanup();
 });

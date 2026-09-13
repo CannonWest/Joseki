@@ -7,7 +7,10 @@ import { EXAMPLES_FOLDER, shippedExamples } from '@joseki/shared';
  * Version 0 is the schema `Database.initTables` creates — every table a fresh
  * database starts with. That baseline is frozen: a change to the shape of an
  * existing table is a migration here, never an edit to a `CREATE TABLE`,
- * because an edit only reaches databases that do not exist yet.
+ * because an edit only reaches databases that do not exist yet. A table
+ * that is retired goes the other way: the migration that drops it reaches
+ * every database, and the baseline stops making it, so a fresh one is not
+ * built a table only to tear it down.
  *
  * SQLite's own `user_version` header field records how far a database has
  * come, so this needs no table of its own and a database carries its version
@@ -127,6 +130,20 @@ export const migrations: Migration[] = [
           );
         }
       }
+    }
+  },
+  {
+    version: 5,
+    name: 'drop the tables nothing reads: model_configs and conversation_trees',
+    up(db) {
+      // model_configs was a hand-kept list of four pre-OpenRouter models and
+      // their prices, seeded into every fresh database and read by nothing:
+      // the gateway's catalog is the only model list, and it prices each
+      // call itself. conversation_trees never held a row — the messages
+      // table's parent_id took its place — and until now it was dropped ad
+      // hoc on every open rather than once, here, where schema changes go.
+      db.exec('DROP TABLE IF EXISTS model_configs');
+      db.exec('DROP TABLE IF EXISTS conversation_trees');
     }
   }
 ];

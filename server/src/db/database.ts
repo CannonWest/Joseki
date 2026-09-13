@@ -6,7 +6,6 @@ import type {
   ExecutionTrace,
   ExecutionRecord,
   ExecutionSummary,
-  ModelConfig,
   Conversation,
   ChatMessage,
   Folder,
@@ -148,8 +147,7 @@ export class Database {
 
     // Chat conversations. Messages form a tree through parent_id — siblings
     // are alternative branches — and the conversation tracks the leaf of the
-    // branch in view. Replaces the never-populated conversation_trees table.
-    this.db.exec(`DROP TABLE IF EXISTS conversation_trees`);
+    // branch in view.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
@@ -189,87 +187,10 @@ export class Database {
     `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)`);
 
-    // Model configs table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS model_configs (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        model_id TEXT NOT NULL,
-        max_tokens INTEGER NOT NULL,
-        pricing TEXT NOT NULL,
-        capabilities TEXT NOT NULL
-      )
-    `);
-
-    // Insert default model configs if empty
-    const count = this.db.prepare('SELECT COUNT(*) as count FROM model_configs').get() as { count: number };
-    if (count.count === 0) {
-      this.insertDefaultModels();
-    }
-
     // The example workflows are not seeded here: the baseline workflows
     // table has no folder column, and they are placed in a folder. The
     // migration that added folders (v4) puts them there, on a fresh database
     // and an old one alike.
-  }
-
-  private insertDefaultModels() {
-    const defaultModels: ModelConfig[] = [
-      {
-        id: 'gpt-4',
-        name: 'GPT-4',
-        provider: 'openai',
-        modelId: 'gpt-4',
-        maxTokens: 8192,
-        pricing: { input: 0.03, output: 0.06 },
-        capabilities: ['chat', 'function-calling']
-      },
-      {
-        id: 'gpt-4-turbo',
-        name: 'GPT-4 Turbo',
-        provider: 'openai',
-        modelId: 'gpt-4-turbo-preview',
-        maxTokens: 128000,
-        pricing: { input: 0.01, output: 0.03 },
-        capabilities: ['chat', 'function-calling', 'vision']
-      },
-      {
-        id: 'gpt-3.5-turbo',
-        name: 'GPT-3.5 Turbo',
-        provider: 'openai',
-        modelId: 'gpt-3.5-turbo',
-        maxTokens: 16385,
-        pricing: { input: 0.0005, output: 0.0015 },
-        capabilities: ['chat', 'function-calling']
-      },
-      {
-        id: 'claude-3-opus',
-        name: 'Claude 3 Opus',
-        provider: 'anthropic',
-        modelId: 'claude-3-opus-20240229',
-        maxTokens: 200000,
-        pricing: { input: 0.015, output: 0.075 },
-        capabilities: ['chat', 'vision']
-      }
-    ];
-
-    const insert = this.db.prepare(`
-      INSERT INTO model_configs (id, name, provider, model_id, max_tokens, pricing, capabilities)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const model of defaultModels) {
-      insert.run(
-        model.id,
-        model.name,
-        model.provider,
-        model.modelId,
-        model.maxTokens,
-        JSON.stringify(model.pricing),
-        JSON.stringify(model.capabilities)
-      );
-    }
   }
 
   // Workflow operations
@@ -733,20 +654,6 @@ export class Database {
       detail: row.detail ? JSON.parse(row.detail) : undefined,
       model: row.model ?? undefined
     };
-  }
-
-  // Model config operations
-  getModelConfigs(): ModelConfig[] {
-    const rows = this.db.prepare('SELECT * FROM model_configs').all() as any[];
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      provider: row.provider,
-      modelId: row.model_id,
-      maxTokens: row.max_tokens,
-      pricing: JSON.parse(row.pricing),
-      capabilities: JSON.parse(row.capabilities)
-    }));
   }
 
   // Conversation operations

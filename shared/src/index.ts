@@ -667,21 +667,6 @@ export interface ExecutionStep {
   parallelGroup?: number;
 }
 
-// ==================== Model Config ====================
-
-export interface ModelConfig {
-  id: string;
-  name: string;
-  provider: 'openai' | 'anthropic' | 'cohere' | 'local';
-  modelId: string;
-  maxTokens: number;
-  pricing: {
-    input: number;
-    output: number;
-  };
-  capabilities: string[];
-}
-
 // ==================== Utility Functions ====================
 
 export function estimateTokens(text: string): number {

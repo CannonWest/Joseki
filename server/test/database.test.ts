@@ -181,6 +181,7 @@ test('opening an existing database replaces the vestigial conversation_trees tab
   fs.rmSync(dir, { recursive: true, force: true });
 
   assert.equal(tables.includes('conversation_trees'), false);
+  assert.equal(tables.includes('model_configs'), false, 'retired in v5, and never made since');
   assert.ok(tables.includes('conversations'));
   assert.ok(tables.includes('messages'));
   assert.ok(tables.includes('workflows'));
