@@ -11,7 +11,6 @@ import type {
 } from '@joseki/shared';
 import {
   asText,
-  calculateCost,
   DEFAULT_GATE_TIMEOUT_SECONDS,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_MAX_REVISIONS,
@@ -458,10 +457,6 @@ export class WorkflowExecutor {
           break;
         }
 
-        case 'model_compare':
-          output = await this.executeModelCompareNode(node, inputs, context);
-          break;
-
         case 'input':
           output = this.executeInputNode(node, context, options);
           break;
@@ -476,16 +471,9 @@ export class WorkflowExecutor {
 
       const latencyMs = Date.now() - startTime;
 
-      // The gateway's own figure when it reports one; otherwise the local
-      // price table, for the few models it knows.
-      let cost = reportedCost ?? 0;
-      if (reportedCost === undefined && model && tokenUsage.total > 0) {
-        // getModelConfig returns the pricing pair itself
-        const pricing = this.getModelConfig(model);
-        if (pricing) {
-          cost = calculateCost(tokenUsage, pricing);
-        }
-      }
+      // The gateway prices every call it serves; there is no other source of
+      // a price here, so a call it did not price is recorded at zero.
+      const cost = reportedCost ?? 0;
 
       return {
         trace: {
@@ -715,30 +703,6 @@ export class WorkflowExecutor {
     return { output, decision };
   }
 
-  private async executeModelCompareNode(
-    node: WorkflowNode,
-    inputs: NodeInput[],
-    context: ExecutionContext
-  ): Promise<any> {
-    const config = node.data.config as any;
-    const promptTemplate = Handlebars.compile(config.prompt, TEMPLATE_OPTIONS);
-    const prompt = promptTemplate(this.templateData(inputs, context));
-
-    const results = await Promise.all(
-      config.models.map(async (model: string) => {
-        const result = await this.llmAdapter.generate({
-          model,
-          systemPrompt: '',
-          userPrompt: prompt,
-          params: { temperature: config.temperature, maxTokens: config.maxTokens }
-        });
-        return { ...result, model };
-      })
-    );
-
-    return { comparisons: results };
-  }
-
   private buildNodeInput(node: WorkflowNode, inputs: NodeInput[], context: ExecutionContext): any {
     // Snapshot of upstream outputs only. The live context holds every node's
     // trace, and each trace holds its input — keeping the reference would make
@@ -750,17 +714,6 @@ export class WorkflowExecutor {
       if (id !== node.id) nodes[id] = entry.output;
     }
     return { inputs: byNode, nodes };
-  }
-
-  private getModelConfig(modelId: string): any {
-    // In real implementation, fetch from database
-    const configs: Record<string, any> = {
-      'gpt-4': { input: 0.03, output: 0.06 },
-      'gpt-4-turbo': { input: 0.01, output: 0.03 },
-      'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
-      'claude-3-opus': { input: 0.015, output: 0.075 }
-    };
-    return configs[modelId];
   }
 }
 

@@ -47,7 +47,6 @@ import { InputNode } from '../nodes/InputNode';
 import { OutputNode } from '../nodes/OutputNode';
 import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
-import { ModelCompareNode } from '../nodes/ModelCompareNode';
 import { RoutedEdge } from '../edges/RoutedEdge';
 import { validateWorkflow, DEFAULT_BRANCH_CONDITION, DEFAULT_WORKFLOW_MODEL, ROOT_FOLDER } from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
@@ -58,8 +57,7 @@ const nodeTypes = {
   input: InputNode,
   output: OutputNode,
   aggregate: AggregateNode,
-  human_gate: HumanGateNode,
-  model_compare: ModelCompareNode
+  human_gate: HumanGateNode
 };
 
 // Every edge routes around nodes; see edges/route.ts.
@@ -465,7 +463,6 @@ function Flow({
           case 'branch': return 'Branch';
           case 'aggregate': return 'Aggregate';
           case 'human_gate': return 'Human Gate';
-          case 'model_compare': return 'Compare Models';
           case 'input': return 'User Input';
           case 'output': return 'Output';
           default: return type;
@@ -608,7 +605,6 @@ function Flow({
                     case 'branch': return '#f59e0b';
                     case 'aggregate': return '#10b981';
                     case 'human_gate': return '#a855f7';
-                    case 'model_compare': return '#ec4899';
                     default: return '#64748b';
                   }
                 }}

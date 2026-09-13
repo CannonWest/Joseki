@@ -17,7 +17,6 @@ export type NodeType =
   | 'branch' 
   | 'aggregate' 
   | 'human_gate' 
-  | 'model_compare'
   | 'input'
   | 'output';
 
@@ -178,13 +177,6 @@ export interface GateDecision {
   edited?: unknown;
 }
 
-export interface ModelCompareConfig {
-  models: string[];
-  prompt: string;
-  temperature: number;
-  maxTokens: number;
-}
-
 export interface InputConfig {
   inputType?: string;
   required?: boolean;
@@ -205,7 +197,6 @@ export type NodeConfig =
   | BranchConfig
   | AggregateConfig
   | HumanGateConfig
-  | ModelCompareConfig
   | InputConfig
   | OutputConfig
   | Record<string, never>;
@@ -695,15 +686,6 @@ export interface ModelConfig {
 
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
-}
-
-export function calculateCost(
-  tokenUsage: TokenUsage,
-  modelPricing: { input: number; output: number }
-): number {
-  const inputCost = (tokenUsage.prompt / 1000) * modelPricing.input;
-  const outputCost = (tokenUsage.completion / 1000) * modelPricing.output;
-  return Number((inputCost + outputCost).toFixed(6));
 }
 
 export function generateId(): string {

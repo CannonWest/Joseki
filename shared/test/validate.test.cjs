@@ -72,6 +72,18 @@ test('an unknown node type is an error', () => {
   assert.ok(result.errors.some((e) => e.includes('unknown type "teleport"')));
 });
 
+test('a retired node type is an error that says what replaced it, not an unknown one', () => {
+  const wf = linear();
+  wf.nodes.push(node('cmp', 'model_compare', { models: ['a', 'b'], prompt: 'x' }));
+  const result = validateWorkflow(wf);
+  assert.equal(result.valid, false);
+  const message = result.errors.find((e) => e.includes('retired type "model_compare"'));
+  assert.ok(message, result.errors.join('\n'));
+  assert.match(message, /prompt nodes off one input/);
+  assert.match(message, /Best of Four/);
+  assert.ok(!result.errors.some((e) => e.includes('unknown type')), 'retired is not unknown');
+});
+
 test('template references to unknown nodes are warnings, not errors', () => {
   const wf = linear();
   wf.nodes[1].data.config.userPrompt = '{{nodes.missing.output}}';

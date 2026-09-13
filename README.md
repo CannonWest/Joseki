@@ -5,11 +5,11 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 ## Features
 
 - **Visual Canvas**: Drag-and-drop workflow builder with React Flow
-- **Node Types**: Prompt, Branch, Aggregate, Human Gate, Model Compare
+- **Node Types**: Prompt, Branch, Aggregate, Human Gate
 - **Real-time Execution**: WebSocket streaming with live token output
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
 - **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
-- **Model Comparison**: Compare outputs from multiple LLMs side-by-side
+- **Model Comparison**: Fan one prompt out to several models and read the answers together — Best of Four in Examples is the shape
 - **Dark Mode**: Optimized for long coding sessions
 
 ## Quick Start

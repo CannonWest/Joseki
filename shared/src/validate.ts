@@ -15,10 +15,20 @@ const NODE_TYPES: ReadonlySet<string> = new Set([
   'branch',
   'aggregate',
   'human_gate',
-  'model_compare',
   'input',
   'output',
 ]);
+
+/**
+ * Node types that once existed, and what to build instead. A file that
+ * still carries one is told that, rather than that the type is unknown:
+ * its author did nothing wrong, the app changed under them.
+ */
+const RETIRED_NODE_TYPES: Readonly<Record<string, string>> = {
+  model_compare:
+    'fan prompt nodes off one input instead, one per model, and read them together ' +
+    'downstream — Best of Four in Examples is the shape',
+};
 
 // Handlebars references into execution context: {{nodes.<id>.output}},
 // {{#with nodes.<id>}}, {{#each nodes.<id>.output}} ...
@@ -97,7 +107,12 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
     nodeIds.add(node.id);
     nodeById.set(node.id, node);
     if (!NODE_TYPES.has(node.type)) {
-      errors.push(`Node "${node.id}" has unknown type "${node.type}"`);
+      const retired = RETIRED_NODE_TYPES[node.type];
+      errors.push(
+        retired
+          ? `Node "${node.id}" has the retired type "${node.type}": ${retired}`
+          : `Node "${node.id}" has unknown type "${node.type}"`
+      );
     }
   }
 
@@ -159,12 +174,6 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
         if (!config.model) warnings.push(`Prompt node "${node.id}" has no model`);
         if (!config.userPrompt) warnings.push(`Prompt node "${node.id}" has an empty user prompt`);
         checkTemplateRefs(node.id, [config.systemPrompt, config.userPrompt], nodeIds, warnings);
-        break;
-      case 'model_compare':
-        if (!Array.isArray(config.models) || config.models.length === 0) {
-          warnings.push(`Model-compare node "${node.id}" has no models to compare`);
-        }
-        checkTemplateRefs(node.id, [config.prompt], nodeIds, warnings);
         break;
       case 'branch':
         if (!config.condition) warnings.push(`Branch node "${node.id}" has no condition`);

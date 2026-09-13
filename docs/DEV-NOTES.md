@@ -182,3 +182,13 @@ nothing is billed.
 - **Runs start over socket.io only** (`execution:start`). There is no REST
   starter, deliberately: it is the path that streams node events and pauses at
   human gates.
+- **There is no Compare node, and it is not coming back.** One existed — a
+  box that sent a prompt to several models at once — and it was retired
+  because the canvas already says it: prompt nodes fanned off one input,
+  read together downstream with `{{#each inputs}}` or by name, which is what
+  Best of Four is. It had a config of its own (a strict subset of the prompt
+  node's, falling further behind with every setting the prompt node grew), a
+  bespoke output every consumer had to know about, and a panel that had never
+  been able to configure one. What it was actually for — the calls going out
+  at once — is the executor's job, not a node's. A file that still carries
+  one fails validation with a message saying what to build instead.

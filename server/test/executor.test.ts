@@ -178,15 +178,16 @@ test('the output node passes its single input through', async () => {
   assert.equal(ctx.out.output, '<gpt-4: Summarize: x>');
 });
 
-test('a prompt trace carries the gateway cost when reported, else the local price table', async () => {
+test('a prompt trace carries the gateway cost when reported, and zero when it is not', async () => {
   const reported = harness(linear(), { inputs: { in: 'x' } });
   reported.llm.cost = 0.00042;
   assert.equal((await reported.run()).draft.trace.cost, 0.00042);
 
-  // gpt-4 is in the local table: 1 prompt token + 1 completion token.
-  const local = harness(linear(), { inputs: { in: 'x' } });
-  const ctx = await local.run();
-  assert.equal(ctx.draft.trace.cost, Number(((1 / 1000) * 0.03 + (1 / 1000) * 0.06).toFixed(6)));
+  // The gateway is the only source of a price. There is no local table to
+  // fall back on, so an unpriced call is not guessed at.
+  const unpriced = harness(linear(), { inputs: { in: 'x' } });
+  const ctx = await unpriced.run();
+  assert.equal(ctx.draft.trace.cost, 0);
 });
 
 test('a failed node stops the run and nothing after it runs', async () => {

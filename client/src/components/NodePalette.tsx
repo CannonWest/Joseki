@@ -45,13 +45,6 @@ const nodeTypes: NodeType[] = [
     icon: '👤'
   },
   {
-    type: 'model_compare',
-    label: 'Compare',
-    description: 'Multi-model test',
-    color: 'bg-pink-600',
-    icon: '⚖'
-  },
-  {
     type: 'output',
     label: 'Output',
     description: 'Workflow output',
