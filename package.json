@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Visual IDE for conversational AI workflows with tree-based branching",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "cd client && npm run dev",
