@@ -189,6 +189,12 @@ A run recorded before this shipped reads back without the branch and skip detail
 
 Runs start over socket.io (`execution:start`), which is the only way to start one — it is the path that streams node events and pauses at human gates.
 
+### Moving the panels out of the way
+
+A gate's panel opens over the top-right of the canvas, which is often over the very thing it is asking you about. **Drag it by its header** to look behind it; it stays where you left it for the rest of the session, so a gate that sends work back and comes round again comes round where you put it. It cannot be pushed fully off screen — a strip stays in the window, and it never goes above the top edge, since the header is the only thing to grab it by.
+
+The execution log's **left edge is a resize handle**: pull it left to widen the panel, between 280px and 900px. That width is remembered in the browser, so a panel widened to read a long condition or a streamed reply opens that wide next time.
+
 ### API
 
 | Endpoint | Method | Description |

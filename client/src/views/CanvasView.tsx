@@ -39,6 +39,7 @@ import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
 import { GateDecisionPanel } from '../components/GateDecisionPanel';
 import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
+import { NO_OFFSET, type Offset } from '../hooks/usePointerDrag';
 import { PromptNode } from '../nodes/PromptNode';
 import { BranchNode } from '../nodes/BranchNode';
 import { InputNode } from '../nodes/InputNode';
@@ -116,7 +117,10 @@ function Flow({
   const [showImport, setShowImport] = useState(openImportOnMount);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
-  
+  // Where the reviewer pushed the gate panel. Kept here rather than in the
+  // panel, which is unmounted and rebuilt every time the run reaches a gate.
+  const [gateOffset, setGateOffset] = useState<Offset>(NO_OFFSET);
+
   const flowWrapper = useRef<HTMLDivElement>(null);
   const { project } = useReactFlow();
   
@@ -625,12 +629,16 @@ function Flow({
                 </Panel>
               )}
               {pendingGate && currentExecutionId && (
-                <Panel position="top-right" className="mt-4 mr-4">
+                // `nopan`: dragging the panel moves the panel, not the canvas
+                // under it.
+                <Panel position="top-right" className="mt-4 mr-4 nopan">
                   <GateDecisionPanel
                     gate={pendingGate}
                     label={nodes.find((n) => n.id === pendingGate.nodeId)?.data?.label ?? pendingGate.nodeId}
                     onDecide={(decision) => resumeGate(currentExecutionId, pendingGate.nodeId, decision)}
                     onCancel={() => cancelExecution(currentExecutionId)}
+                    offset={gateOffset}
+                    onMove={setGateOffset}
                   />
                 </Panel>
               )}

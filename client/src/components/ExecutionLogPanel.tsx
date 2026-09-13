@@ -1,21 +1,43 @@
 import { useRef, useEffect } from 'react';
 import { useExecutionStore } from '../stores/executionStore';
+import { useResizableWidth } from '../hooks/useResizableWidth';
 
 interface ExecutionLogPanelProps {
   onClose: () => void;
 }
 
+/** The 24rem the panel used to be fixed at, and how far it may now be taken. */
+const DEFAULT_WIDTH = 384;
+const WIDTH_BOUNDS = { min: 280, max: 900 };
+const WIDTH_KEY = 'joseki.executionLog.width';
+
 // Node events and streamed prompt output for the run in progress
 export function ExecutionLogPanel({ onClose }: ExecutionLogPanelProps) {
   const { logs, nodeStates } = useExecutionStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { width, resizing, handleProps } = useResizableWidth(WIDTH_KEY, DEFAULT_WIDTH, WIDTH_BOUNDS);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
   return (
-    <div className="w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col overflow-hidden">
+    <div
+      style={{ width }}
+      className={`relative h-full shrink-0 bg-slate-900 border-l border-slate-800 flex flex-col overflow-hidden ${
+        resizing ? 'select-none' : ''
+      }`}
+    >
+      {/* A condition or a streamed reply can be a good deal wider than the
+          column it arrives in. Pull this edge left to read it. */}
+      <div
+        {...handleProps}
+        title="Drag to resize"
+        className={`absolute left-0 top-0 h-full w-1.5 z-10 cursor-col-resize touch-none transition-colors ${
+          resizing ? 'bg-blue-500/70' : 'hover:bg-blue-500/40'
+        }`}
+      />
+
       <div className="h-12 border-b border-slate-800 flex items-center justify-between px-4">
         <h3 className="font-semibold text-slate-200">Execution Log</h3>
         <button
@@ -44,7 +66,9 @@ export function ExecutionLogPanel({ onClose }: ExecutionLogPanelProps) {
               <span className="text-xs opacity-60">
                 {new Date(log.timestamp).toLocaleTimeString()}
               </span>
-              <p>{log.message}</p>
+              {/* A branch line carries its condition, which can be longer
+                  than the column is wide. */}
+              <p className="break-words">{log.message}</p>
             </div>
           ))
         )}

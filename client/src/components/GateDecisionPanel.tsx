@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ExecutionPausedEvent, GateDecision } from '@joseki/shared';
+import { usePointerDrag, type Offset } from '../hooks/usePointerDrag';
 
 interface GateDecisionPanelProps {
   gate: ExecutionPausedEvent;
@@ -7,6 +8,14 @@ interface GateDecisionPanelProps {
   label: string;
   onDecide: (decision: GateDecision) => void;
   onCancel: () => void;
+  /**
+   * Where the reviewer has pushed the panel. Held above this component so it
+   * survives the panel being unmounted each time the run moves past the gate
+   * — a gate that sends work back comes round again, and it should come round
+   * where it was left.
+   */
+  offset: Offset;
+  onMove: (offset: Offset) => void;
 }
 
 function asText(value: unknown): string {
@@ -20,10 +29,19 @@ function asText(value: unknown): string {
  * the reviewer's edit, when the gate allows it); Send back takes the fail
  * arrows with an optional note the next pass can read.
  */
-export function GateDecisionPanel({ gate, label, onDecide, onCancel }: GateDecisionPanelProps) {
+export function GateDecisionPanel({
+  gate,
+  label,
+  onDecide,
+  onCancel,
+  offset,
+  onMove
+}: GateDecisionPanelProps) {
   const original = asText(gate.content);
   const [text, setText] = useState(original);
   const [note, setNote] = useState('');
+  const panel = useRef<HTMLDivElement>(null);
+  const { dragging, handleProps, panelStyle } = usePointerDrag(offset, onMove, panel);
 
   const atLimit = gate.revision >= gate.maxRevisions;
   const edited = gate.allowEdit && text !== original;
@@ -43,10 +61,22 @@ export function GateDecisionPanel({ gate, label, onDecide, onCancel }: GateDecis
 
   return (
     <div
-      className="w-[28rem] max-w-[90vw] bg-slate-900 border border-purple-500/60 rounded-lg shadow-xl flex flex-col"
+      ref={panel}
+      style={panelStyle}
+      className={`w-[28rem] max-w-[90vw] bg-slate-900 border border-purple-500/60 rounded-lg shadow-xl flex flex-col ${
+        dragging ? 'select-none' : ''
+      }`}
       data-testid="gate-decision-panel"
     >
-      <div className="h-12 border-b border-slate-800 flex items-center justify-between px-4">
+      {/* The header is the handle: the panel covers the canvas it is asking
+          about, so it has to be possible to push it aside and look. */}
+      <div
+        {...handleProps}
+        title="Drag to move"
+        className={`h-12 border-b border-slate-800 flex items-center justify-between px-4 touch-none ${
+          dragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
+      >
         <h3 className="font-semibold text-slate-200">
           <span className="text-purple-400 mr-2">👤</span>
           {label} is waiting
