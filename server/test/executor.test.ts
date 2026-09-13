@@ -93,20 +93,37 @@ function harness(wf: Workflow, options: ExecutionOptions = {}, decide?: Decide) 
   const completed: Array<{ nodeId: string; status: ExecutionTrace['status'] }> = [];
   const paused: ExecutionPausedEvent[] = [];
 
-  const run = () =>
-    executor.execute(wf, 'run', {
-      ...options,
-      gates,
-      onNodeStart: (id) => started.push(id),
-      onNodeComplete: (id, trace) => completed.push({ nodeId: id, status: trace.status }),
-      onPaused: (event) => {
-        const index = paused.push(event) - 1;
-        setImmediate(() => {
-          const decision = decide?.(event, index, gates);
-          if (decision) gates.resolve(event.executionId, event.nodeId, decision);
-        });
-      }
-    });
+  // The gate registry unrefs its timeout timer on purpose (gates.ts): a waiting
+  // gate must not keep a server process alive by itself, because the HTTP
+  // server's own handle already does. This process has no server. With the
+  // executor's sleep faked (above) and onPaused's setImmediate spent, a run
+  // waiting on a gate leaves NOTHING ref'd, so Node reaches beforeExit, and
+  // node:test cancels the still-pending test and every test after it in the
+  // file: "Promise resolution is still pending but the event loop has already
+  // resolved". It passed on a laptop only because tsx/stdout held a handle a
+  // few hundred microseconds longer than the 20 ms gate timeout; on the CI
+  // runner they did not (duration_ms 19.55 of 20). One ref'd interval for the
+  // run's lifetime plays the server's part; the gate's own timer still decides.
+  const run = async () => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    try {
+      return await executor.execute(wf, 'run', {
+        ...options,
+        gates,
+        onNodeStart: (id) => started.push(id),
+        onNodeComplete: (id, trace) => completed.push({ nodeId: id, status: trace.status }),
+        onPaused: (event) => {
+          const index = paused.push(event) - 1;
+          setImmediate(() => {
+            const decision = decide?.(event, index, gates);
+            if (decision) gates.resolve(event.executionId, event.nodeId, decision);
+          });
+        }
+      });
+    } finally {
+      clearInterval(keepAlive);
+    }
+  };
 
   return { db, llm, gates, run, started, completed, paused, waits };
 }
