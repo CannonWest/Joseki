@@ -17,7 +17,7 @@
     "install:all": "npm install && cd shared && npm install && cd ../server && npm install && cd ../client && npm install",
     "test": "cd shared && npm test && cd ../server && npm test && cd ../client && npm test",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p shared && tsc --noEmit -p server && tsc --noEmit -p client"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
