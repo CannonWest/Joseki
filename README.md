@@ -8,7 +8,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Node Types**: Prompt, Branch, Aggregate, Human Gate, Model Compare
 - **Real-time Execution**: WebSocket streaming with live token output
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
-- **Folders**: Workflows live in folders, like files; the shipped examples come in one called Examples
+- **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
 - **Model Comparison**: Compare outputs from multiple LLMs side-by-side
 - **Dark Mode**: Optimized for long coding sessions
 
@@ -124,9 +124,17 @@ Opening another workflow from the editor saves the one on the canvas first, the 
 
 ### Examples
 
-The `Examples` folder holds what Joseki ships: the **Content Review Pipeline** — input → draft → quality branch → revision → merge → editor gate → output, the one **Try Example** opens — and the **Translation Round-Trip** — input → French → back to English → spot the drift → output. The round trip is a straight line with no gate, so it also runs from chat: `run_workflow` with `"Examples/Translation Round-Trip"` and an `English Text` input. Its three prompts show the two ways a prompt reads what came before it, `{{input}}` for the arrow in and `{{nodes.<id>.output}}` for any node at all.
+The `Examples` folder holds the three workflows Joseki ships, one per shape.
 
-They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start. **Restore** in the Open dialog's footer puts back whichever are missing, and **Try Example** does the same for the pipeline before opening it; neither touches an example that is there.
+**Content Review Pipeline** — input → draft → quality branch → revision → merge → editor gate → output. The branching one, and the one **Try Example** opens. Its gate sends work back with a note the redraft can read, up to `maxRevisions`.
+
+**Translation Round-Trip** — input → French → back to English → spot the drift → output. A straight line, so it also runs from chat: `run_workflow` with `"Examples/Translation Round-Trip"` and an `English Text` input. Its three prompts show the two ways a prompt reads what came before it, `{{input}}` for the arrow in and `{{nodes.<id>.output}}` for any node at all.
+
+**Best of Four** — input → four cheap models → a judge → output. The fan: one prompt goes out to four models from four houses, and a fifth reads all four answers and reprints the best one in full. The four are identical but for the model they name, so the model is the only thing the comparison measures. The judge is the point — four arrows arrive at once and `{{input}}` is only the first of them, so it names every node it reads, the input node included. It is told A, B, C and D and never which model wrote which; the node labels carry the key, and the judge is from a house that is not in the field. No gate, so chat can run this one too.
+
+The fan is about what feeds what, not wall-clock: the executor runs one node at a time, so the four answers come in turn.
+
+They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. **Try Example** does the same before opening the pipeline. Neither touches an example that is there.
 
 ### API
 

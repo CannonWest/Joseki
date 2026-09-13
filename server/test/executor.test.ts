@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createExampleWorkflow, MAX_ATTEMPTS } from '@joseki/shared';
+import { createBestOfFour, createExampleWorkflow, MAX_ATTEMPTS } from '@joseki/shared';
 import type {
   ChatParams,
   Workflow,
@@ -572,6 +572,48 @@ test('sending the example back re-drafts with the note, and the second approval 
   assert.equal(h.paused[1].revision, 1);
   assert.equal(ctx.example_output.output, ctx.example_merge.output);
   assert.equal(h.completed.at(-1)?.nodeId, 'example_output');
+});
+
+test('best of four sends one prompt to four models and hands all four to the judge', async () => {
+  const question = 'Why is the sky blue?';
+  const wf = createBestOfFour();
+  const h = harness(wf, { inputs: { bestof_input: question } });
+  const ctx = await h.run();
+
+  // Four answers and a verdict: one call per candidate, then the judge.
+  assert.equal(h.llm.calls.length, 5);
+  const candidates = wf.nodes.filter((n) => n.type === 'prompt' && n.id !== 'bestof_judge');
+  const judge = wf.nodes.find((n) => n.id === 'bestof_judge')!;
+
+  // Each candidate ran on its own model, and each was given the question itself.
+  const field = h.llm.calls.slice(0, 4);
+  assert.deepEqual(
+    field.map((c) => c.model),
+    candidates.map((n) => (n.data.config as any).model)
+  );
+  for (const call of field) {
+    assert.equal(call.userPrompt, question);
+    assert.equal(call.systemPrompt, (candidates[0].data.config as any).systemPrompt);
+  }
+
+  // The judge got the question and all four answers — nothing lost to {{input}}
+  // picking whichever arrow arrived first.
+  const verdict = h.llm.calls[4];
+  assert.equal(verdict.model, (judge.data.config as any).model);
+  assert.ok(verdict.userPrompt.includes(question));
+  for (const candidate of candidates) {
+    assert.ok(
+      verdict.userPrompt.includes(String(ctx[candidate.id].output)),
+      `the judge should have been given ${candidate.id}'s answer`
+    );
+  }
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    assert.ok(verdict.userPrompt.includes(`--- Answer ${letter} ---`));
+  }
+
+  // What the workflow produces is the judge's pick.
+  assert.equal(ctx.bestof_output.output, ctx.bestof_judge.output);
+  assert.equal(h.completed.at(-1)?.nodeId, 'bestof_output');
 });
 
 // ==================== what a run records about its decisions ====================

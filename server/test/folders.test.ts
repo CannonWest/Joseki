@@ -39,12 +39,12 @@ function codeOf(fn: () => unknown): FolderError['code'] | undefined {
 
 // ==================== what a database starts with ====================
 
-test('a fresh database has the Examples folder with both shipped examples, and nothing at the root', () => {
+test('a fresh database has the Examples folder with every shipped example, and nothing at the root', () => {
   const db = new Database(':memory:');
 
   const root = db.folderListing('')!;
   assert.deepEqual(root.folders.map((f) => f.name), [EXAMPLES_FOLDER]);
-  assert.equal(root.folders[0].workflowCount, 2);
+  assert.equal(root.folders[0].workflowCount, SHIPPED_EXAMPLE_IDS.length);
   assert.equal(root.folders[0].folderCount, 0);
   assert.deepEqual(root.workflows, [], 'the root is for the workflows people make');
 
@@ -185,12 +185,13 @@ test('deleting a folder refuses one that holds anything, unless told to take it 
     }
     return undefined;
   })();
+  const shipped = SHIPPED_EXAMPLE_IDS.length;
   assert.equal(refused?.code, 'not_empty');
-  assert.deepEqual(refused?.contents, { workflows: 2, folders: 0 });
-  assert.match(refused!.message, /2 workflows/);
+  assert.deepEqual(refused?.contents, { workflows: shipped, folders: 0 });
+  assert.match(refused!.message, new RegExp(`${shipped} workflows`));
   assert.equal(db.hasFolder(EXAMPLES_FOLDER), true, 'a refusal changes nothing');
 
-  assert.deepEqual(db.deleteFolder(EXAMPLES_FOLDER, { recursive: true }), { workflows: 2, folders: 0 });
+  assert.deepEqual(db.deleteFolder(EXAMPLES_FOLDER, { recursive: true }), { workflows: shipped, folders: 0 });
   assert.equal(db.hasFolder(EXAMPLES_FOLDER), false);
   assert.equal(db.getWorkflow(CONTENT_REVIEW_PIPELINE_ID), undefined);
   assert.equal(db.getExecution('run-1'), undefined, 'the runs went with the workflow');
@@ -251,7 +252,7 @@ test('restoring the examples puts back only the missing ones, and leaves an edit
 
   // The whole folder gone comes back with the examples in it.
   db.deleteFolder(EXAMPLES_FOLDER, { recursive: true });
-  assert.equal(db.restoreExamples().length, 2);
+  assert.equal(db.restoreExamples().length, SHIPPED_EXAMPLE_IDS.length);
   assert.equal(db.hasFolder(EXAMPLES_FOLDER), true);
   db.close();
 });
@@ -279,7 +280,7 @@ function v3Database(seedExample: boolean) {
   return { file, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
-test('v4 moves the example an older database kept at the root into Examples, keeps its edits, and adds the round trip', () => {
+test('v4 moves the example an older database kept at the root into Examples, keeps its edits, and adds the ones it never had', () => {
   const { file, cleanup } = v3Database(true);
 
   const db = new Database(file);
@@ -294,12 +295,12 @@ test('v4 moves the example an older database kept at the root into Examples, kee
 
   assert.equal(db.getWorkflow(TRANSLATION_ROUND_TRIP_ID)!.folder, EXAMPLES_FOLDER);
   assert.deepEqual(db.listFolders().map((f) => f.path), [EXAMPLES_FOLDER]);
-  assert.equal(db.getAllWorkflows().length, 2);
+  assert.equal(db.getAllWorkflows().length, SHIPPED_EXAMPLE_IDS.length);
   db.close();
   cleanup();
 });
 
-test('v4 on an older database with no example adds both, and gives the table its folder column and index', () => {
+test('v4 on an older database with no example adds them all, and gives the table its folder column and index', () => {
   const { file, cleanup } = v3Database(false);
 
   const db = new Database(file);
@@ -366,7 +367,7 @@ test('GET /api/folders lists a folder — the root by default — and 404s for o
 
   const examples = await api.get(`/api/folders?path=${EXAMPLES_FOLDER}`);
   assert.equal(examples.status, 200);
-  assert.equal((examples.body as FolderListing).workflows.length, 2);
+  assert.equal((examples.body as FolderListing).workflows.length, SHIPPED_EXAMPLE_IDS.length);
 
   const missing = await api.get('/api/folders?path=ghost');
   assert.equal(missing.status, 404);
@@ -427,11 +428,11 @@ test('DELETE /api/folders refuses a folder with contents and says what they are,
   const refused = await api.delete(`/api/folders?path=${EXAMPLES_FOLDER}`);
   assert.equal(refused.status, 409);
   assert.equal(refused.body.code, 'not_empty');
-  assert.deepEqual(refused.body.contents, { workflows: 2, folders: 0 });
+  assert.deepEqual(refused.body.contents, { workflows: SHIPPED_EXAMPLE_IDS.length, folders: 0 });
 
   const taken = await api.delete(`/api/folders?path=${EXAMPLES_FOLDER}&recursive=true`);
   assert.equal(taken.status, 200);
-  assert.deepEqual(taken.body, { deleted: { workflows: 2, folders: 0 } });
+  assert.deepEqual(taken.body, { deleted: { workflows: SHIPPED_EXAMPLE_IDS.length, folders: 0 } });
   assert.equal(api.db.getAllWorkflows().length, 0);
 
   assert.equal((await api.delete('/api/folders?path=')).status, 400, 'the root stays');
