@@ -121,6 +121,13 @@ nothing is billed.
   Anything else added to `shared` ships to the client bundle too.
 - **No default `React` import** in a component — the JSX transform does not
   need it and the client build fails on the unused binding.
+- **A new file added while `dev:client` is running can leave HMR serving a
+  module that references it before it is registered.** It reads exactly like a
+  code bug — `ReferenceError: X is not defined` thrown from a component, caught
+  by `ViewBoundary`, while `tsc --noEmit` and `npm run build` are both clean.
+  The tell is the module timestamp in the stack (`CanvasView.tsx?t=…`) pointing
+  at a load from before the file existed. Restart the dev server; do not go
+  looking for the import, which is fine.
 - **`ReactFlowProvider` stays inside `CanvasView`.** Hoisting it above the
   lazy boundary breaks the canvas.
 - **Schema changes go in `server/src/db/migrations.ts`**, never into a
