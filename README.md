@@ -124,15 +124,11 @@ Opening another workflow from the editor saves the one on the canvas first, the 
 
 ### Examples
 
-The `Examples` folder holds the three workflows Joseki ships, one per shape.
+The `Examples` folder holds the three workflows Joseki ships, one per shape. Each is written up in [docs/EXAMPLES.md](docs/EXAMPLES.md) — the shape, every node, what it teaches, how to run it, and what a run costs.
 
-**Content Review Pipeline** — input → draft → quality branch → revision → merge → editor gate → output. The branching one, and the one **Try Example** opens. Its gate sends work back with a note the redraft can read, up to `maxRevisions`.
-
-**Translation Round-Trip** — input → French → back to English → spot the drift → output. A straight line, so it also runs from chat: `run_workflow` with `"Examples/Translation Round-Trip"` and an `English Text` input. Its three prompts show the two ways a prompt reads what came before it, `{{input}}` for the arrow in and `{{nodes.<id>.output}}` for any node at all.
-
-**Best of Four** — input → four cheap models → a judge → output. The fan: one prompt goes out to four models from four houses, and a fifth reads all four answers and reprints the best one in full. The four are identical but for the model they name, so the model is the only thing the comparison measures. The judge is the point — four arrows arrive at once and `{{input}}` is only the first of them, so it names every node it reads, the input node included. It is told A, B, C and D and never which model wrote which; the node labels carry the key, and the judge is from a house that is not in the field. No gate, so chat can run this one too.
-
-The four go out at once — the executor runs every node whose arrows are resolved — so the fan takes as long as its slowest answer, not the sum of the four.
+- **Content Review Pipeline** — the branching one, and the one **Try Example** opens: draft → quality branch → revision → merge → an editor gate that can send the work back with a note the next draft reads.
+- **Translation Round-Trip** — the straight line: English → French → English → what drifted. Shows the two ways a prompt reads what came before it, `{{input}}` and `{{nodes.<id>.output}}`; runs from chat too.
+- **Best of Four** — the fan: one prompt to four cheap models at once, and a blind judge that reprints the best answer in full. Shows the third way — naming every node when several arrows arrive; runs from chat too.
 
 They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. **Try Example** does the same before opening the pipeline. Neither touches an example that is there.
 
