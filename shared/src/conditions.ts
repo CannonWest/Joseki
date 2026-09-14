@@ -187,7 +187,7 @@ export function evaluateCondition(condition: string, scope: Record<string, unkno
       : '';
     throw new Error(
       `Branch condition "${condition}" could not be evaluated: ${message}.${nullHint} ` +
-      `Available: input, inputs, nodes, and the functions ${CONDITION_VOCABULARY.join(', ')} ` +
+      `Available: input, inputs, nodes, vars, and the functions ${CONDITION_VOCABULARY.join(', ')} ` +
       `(plus length, if, and, or, not). Reach a field with get(input, "score"), ` +
       `and a node whose id has a hyphen with get(nodes, "prompt-123").`
     );

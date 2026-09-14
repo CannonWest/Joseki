@@ -36,6 +36,7 @@ import { labelsOf, runWhen, statusTone } from '../runs/format';
 import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
+import { VariablesModal } from '../components/VariablesModal';
 import { OpenWorkflowDialog } from '../components/OpenWorkflowDialog';
 import { GateDecisionPanel } from '../components/GateDecisionPanel';
 import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
@@ -111,6 +112,7 @@ function Flow({
   const [showRuns, setShowRuns] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -560,6 +562,8 @@ function Flow({
           onValidate={handleValidate}
           onExport={handleExport}
           onImport={() => setShowImport(true)}
+          onVariables={() => setShowVariables(true)}
+          variableCount={Object.keys(currentWorkflow?.variables ?? {}).length}
         />
         
         <div className="flex-1 flex overflow-hidden">
@@ -733,6 +737,16 @@ function Flow({
       )}
       {showImport && (
         <ImportModal onClose={() => setShowImport(false)} onImported={handleImported} />
+      )}
+      {showVariables && currentWorkflow && (
+        <VariablesModal
+          variables={currentWorkflow.variables ?? {}}
+          onClose={() => setShowVariables(false)}
+          onSave={(variables) => {
+            setCurrentWorkflow({ ...currentWorkflow, variables });
+            setShowVariables(false);
+          }}
+        />
       )}
       {showOpen && (
         <OpenWorkflowDialog

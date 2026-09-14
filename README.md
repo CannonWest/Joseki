@@ -9,6 +9,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Real-time Execution**: WebSocket streaming with live token output; nodes that don't depend on each other run at once
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
 - **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
+- **Variables**: Declare values once and read them from every prompt and condition in the run
 - **Model Comparison**: Fan one prompt out to several models and read the answers together — Best of Four in Examples is the shape
 - **Dark Mode**: Optimized for long coding sessions
 
@@ -147,17 +148,30 @@ They are files like any other: edit one and the edit is kept; delete one and it 
 
 A workflow carries `folder` wherever it goes — `GET`, `PUT`, export. `POST /api/workflows` and a creating `PUT` take one, the root when it is left out; `PUT` on an existing workflow leaves the folder alone unless the body names one. The chat tools see folders too: `list_workflows` says which folder each workflow is in, and `run_workflow` takes `Folder/Name` as well as a name or an id.
 
+## Variables
+
+A workflow can declare values of its own: a target language, a threshold, a tone, a model slug three prompts name. **Variables** in the toolbar is where they are written down — a name, a value, and the type it was read as. A prompt reads one as `{{vars.tone}}`, a branch condition as `vars.threshold`.
+
+They are **single-assignment**: declared before the run and constant through it, and no node writes one. That is the whole design, not a missing feature. The executor runs every ready node at once — Best of Four starts four prompts within 14 ms of each other — so a value a node could reassign would be read differently depending on which sibling happened to finish first, and two runs of one workflow would stop meaning the same thing. What a node produces already has a name: `{{nodes.<id>.output}}`.
+
+A value is read as JSON when it parses as one and as text when it does not, so `0.7` is a number, `true` is a boolean and `dry` is the word — the panel says which beside each row. The difference is not cosmetic: a variable reaches a condition **as the type it was declared as**, so `vars.threshold > 9` compares numbers, where the text `"10" > "9"` would be false.
+
+A name has to be one both readers can see — a letter or underscore, then letters, digits and underscores. A hyphen is subtraction to the condition parser, the same trap that makes a canvas-minted node id need `get(nodes, "…")`. `length` is refused for a subtler reason: the parser reserves it as a member name, so `vars.length` is a parse error rather than a lookup, and the variable would be declarable and unreadable. **Validate** flags a bad name, and a `{{vars.x}}` or `vars.x` the workflow does not declare — an undeclared variable renders as nothing in a prompt and reads as nothing in a condition, which makes every comparison against it false. Both are silent at run time, which is why they are said at edit time.
+
+Variables travel with the workflow through export and import, and a run may be given its own set in place of them.
+
 ## Branching
 
 A branch node decides **true** or **false**, and the arrow on that handle fires while the other path is skipped. Its **Condition** is an expression, not JavaScript — nothing in it can call out of itself, so a condition is data the same way a prompt is.
 
-Three names are in scope, the same three a prompt template sees:
+Four names are in scope, the same four a prompt template sees:
 
 | Name | What it holds |
 |------|---------------|
 | `input` | What arrived on the first arrow into the branch, as text |
 | `inputs` | Every arrow into the branch, keyed by the node it came from |
 | `nodes` | Every node that has run so far, keyed by id |
+| `vars` | What the workflow declares — see **Variables** above |
 
 Past arithmetic, comparison, `and` / `or` / `not` and `if(…)`, the vocabulary is:
 

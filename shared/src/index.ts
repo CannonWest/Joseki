@@ -9,6 +9,7 @@ export * from './chat';
 export * from './patch';
 export * from './models';
 export * from './conditions';
+export * from './variables';
 
 // ==================== Workflow Types ====================
 
@@ -63,6 +64,12 @@ export interface Workflow {
   folder: string;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  /**
+   * The values the author declared, read by every prompt as `{{vars.<name>}}`
+   * and every condition as `vars.<name>`. Single-assignment: no node writes
+   * one, so a run reads the same values throughout however its nodes
+   * interleave. See variables.ts for what a name may be and why.
+   */
   variables: Record<string, any>;
   createdAt: number;
   updatedAt: number;
