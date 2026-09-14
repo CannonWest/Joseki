@@ -6,8 +6,8 @@
  * deleted. They are put there once — when a database is created, and by the
  * migration that introduced folders — not on every start, so a folder
  * cleared on purpose does not fill back up. To have them again, the server
- * restores whichever are missing on request, which is also what the welcome
- * screen's Try Example does before opening one.
+ * restores whichever are missing on request — **Restore** in the Open
+ * dialog's footer asks for exactly that.
  */
 
 import type { Workflow } from './index';

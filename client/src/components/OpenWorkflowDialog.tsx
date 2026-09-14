@@ -62,8 +62,8 @@ const inputField =
  * The workflow library, as a filesystem: folders to walk into, workflows
  * to open, and the things done to either — rename, move, delete — done in
  * the row itself, so nothing is asked in a second dialog. The Examples
- * folder holds what Joseki ships; everything made from the welcome screen
- * goes in the root.
+ * folder holds what Joseki ships; a new workflow starts in the folder it is
+ * made from.
  */
 export function OpenWorkflowDialog({
   initialPath = ROOT_FOLDER,
@@ -134,7 +134,7 @@ export function OpenWorkflowDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [mode, onClose]);
 
-  /** Runs a change, then reads the folder again and tells the store, whose counts the welcome screen shows. */
+  /** Runs a change, then reads the folder again and tells the store. */
   const change = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);

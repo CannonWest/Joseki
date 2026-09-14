@@ -8,7 +8,7 @@
  * Draft Summary for another pass, up to the gate's maxRevisions. When the
  * reviewer leaves a note, the redraft sees it.
  *
- * Users can load this from the welcome screen to explore Joseki's capabilities.
+ * Users can open this from the Examples folder to explore Joseki's capabilities.
  */
 
 import type {

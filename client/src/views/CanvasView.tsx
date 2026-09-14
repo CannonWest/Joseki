@@ -3,9 +3,8 @@
  *
  * Split out of App.tsx so it can sit behind a React.lazy boundary: reactflow,
  * the seven node components and the Monaco-backed config panel are the bulk of
- * the client bundle, and none of it is needed to render the welcome screen or
- * the chat view. App imports this module dynamically, so it becomes its own
- * chunk that is fetched when the editor is first opened.
+ * the client bundle, and none of it is needed to render the chat view. App
+ * imports this module dynamically, so it becomes its own chunk.
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import ReactFlow, {
@@ -100,10 +99,8 @@ function decorateEdge(edge: Edge, nodes: Node[], isSelected: boolean): Edge {
 }
 
 function Flow({
-  openImportOnMount = false,
   onOpenChat
 }: {
-  openImportOnMount?: boolean;
   onOpenChat: () => void;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -113,7 +110,7 @@ function Flow({
   const [showLog, setShowLog] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [validation, setValidation] = useState<WorkflowValidation | null>(null);
-  const [showImport, setShowImport] = useState(openImportOnMount);
+  const [showImport, setShowImport] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -764,15 +761,13 @@ function Flow({
 // The provider lives here rather than in App so that App never imports
 // reactflow itself — that is what keeps it out of the entry chunk.
 export default function CanvasView({
-  openImportOnMount = false,
   onOpenChat
 }: {
-  openImportOnMount?: boolean;
   onOpenChat: () => void;
 }) {
   return (
     <ReactFlowProvider>
-      <Flow openImportOnMount={openImportOnMount} onOpenChat={onOpenChat} />
+      <Flow onOpenChat={onOpenChat} />
     </ReactFlowProvider>
   );
 }
