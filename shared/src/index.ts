@@ -13,11 +13,12 @@ export * from './variables';
 
 // ==================== Workflow Types ====================
 
-export type NodeType = 
-  | 'prompt' 
-  | 'branch' 
-  | 'aggregate' 
-  | 'human_gate' 
+export type NodeType =
+  | 'prompt'
+  | 'branch'
+  | 'transform'
+  | 'aggregate'
+  | 'human_gate'
   | 'input'
   | 'output';
 
@@ -154,6 +155,27 @@ export interface BranchConfig {
   }>;
 }
 
+/**
+ * A step that works something out without asking a model.
+ *
+ * The expression is the branch condition language, which already reads
+ * everything a run has (`input`, `inputs`, `nodes`, `vars`) and can already
+ * parse JSON, walk a path and measure text. A branch throws away everything
+ * but the true or false; a transform keeps the answer and carries it on.
+ *
+ * So `get(input, "score")` pulls a field out of a model's JSON and hands the
+ * number downstream, where it used to take a second prompt to do it — and the
+ * number is the node's output, read the ordinary way as
+ * `{{nodes.<id>.output}}`.
+ */
+export interface TransformConfig {
+  expression: string;
+  onError?: ErrorHandlerConfig;
+}
+
+/** What a transform node starts life with: the arrow in, unchanged. */
+export const DEFAULT_TRANSFORM_EXPRESSION = 'input';
+
 export interface AggregateConfig {
   strategy: 'concat' | 'vote' | 'merge';
   separator?: string;
@@ -202,6 +224,7 @@ export interface OutputConfig {
 export type NodeConfig =
   | PromptConfig
   | BranchConfig
+  | TransformConfig
   | AggregateConfig
   | HumanGateConfig
   | InputConfig

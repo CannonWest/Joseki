@@ -43,17 +43,25 @@ import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
 import { NO_OFFSET, type Offset } from '../hooks/usePointerDrag';
 import { PromptNode } from '../nodes/PromptNode';
 import { BranchNode } from '../nodes/BranchNode';
+import { TransformNode } from '../nodes/TransformNode';
 import { InputNode } from '../nodes/InputNode';
 import { OutputNode } from '../nodes/OutputNode';
 import { AggregateNode } from '../nodes/AggregateNode';
 import { HumanGateNode } from '../nodes/HumanGateNode';
 import { RoutedEdge } from '../edges/RoutedEdge';
-import { validateWorkflow, DEFAULT_BRANCH_CONDITION, DEFAULT_WORKFLOW_MODEL, ROOT_FOLDER } from '@joseki/shared';
+import {
+  validateWorkflow,
+  DEFAULT_BRANCH_CONDITION,
+  DEFAULT_TRANSFORM_EXPRESSION,
+  DEFAULT_WORKFLOW_MODEL,
+  ROOT_FOLDER
+} from '@joseki/shared';
 import type { NodeType, Workflow, WorkflowValidation } from '@joseki/shared';
 
 const nodeTypes = {
   prompt: PromptNode,
   branch: BranchNode,
+  transform: TransformNode,
   input: InputNode,
   output: OutputNode,
   aggregate: AggregateNode,
@@ -460,6 +468,7 @@ function Flow({
         switch (type) {
           case 'prompt': return 'AI Prompt';
           case 'branch': return 'Branch';
+          case 'transform': return 'Transform';
           case 'aggregate': return 'Aggregate';
           case 'human_gate': return 'Human Gate';
           case 'input': return 'User Input';
@@ -494,6 +503,10 @@ function Flow({
             // dropped on the canvas used to fail on its first run.
             return {
               condition: DEFAULT_BRANCH_CONDITION
+            };
+          case 'transform':
+            return {
+              expression: DEFAULT_TRANSFORM_EXPRESSION
             };
           case 'human_gate':
             return {
@@ -604,6 +617,7 @@ function Flow({
                   switch (node.type) {
                     case 'prompt': return '#3b82f6';
                     case 'branch': return '#f59e0b';
+                    case 'transform': return '#06b6d4';
                     case 'aggregate': return '#10b981';
                     case 'human_gate': return '#a855f7';
                     default: return '#64748b';

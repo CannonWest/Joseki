@@ -5,6 +5,7 @@ import {
   CONDITION_VOCABULARY,
   DEFAULT_BRANCH_CONDITION,
   DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_TRANSFORM_EXPRESSION,
   DEFAULT_WORKFLOW_MODEL,
   MAX_ATTEMPTS
 } from '@joseki/shared';
@@ -126,6 +127,10 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
         case 'branch':
           varName = `nodes.${sourceNode.id}.output`;
           description = `Branch Result: ${sourceNode.data?.label}`;
+          break;
+        case 'transform':
+          varName = `nodes.${sourceNode.id}.output`;
+          description = `Computed: ${sourceNode.data?.label}`;
           break;
         case 'aggregate':
           varName = `nodes.${sourceNode.id}.output`;
@@ -401,6 +406,72 @@ export function NodeConfigPanel({ node, nodes, edges, onClose, onUpdate, onDelet
                   <code className="text-slate-400">not</code>. A node id with a hyphen has to go
                   through <code className="text-slate-400">get(nodes, "…")</code> — bare, the
                   hyphen reads as subtraction.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'transform':
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Expression
+              </label>
+              <div className="h-40 border border-slate-700 rounded overflow-hidden">
+                <Editor
+                  height="100%"
+                  defaultLanguage="plaintext"
+                  value={config.expression ?? DEFAULT_TRANSFORM_EXPRESSION}
+                  onChange={(v) => setConfig({ ...config, expression: v })}
+                  theme="vs-dark"
+                  options={{
+                    minimap: { enabled: false },
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    fontSize: 12
+                  }}
+                />
+              </div>
+              <div className="text-xs text-slate-500 mt-1 space-y-1">
+                <p>
+                  Works something out without asking a model. The same language a branch
+                  condition is written in, except the answer is kept rather than turned into
+                  an arrow — whatever it computes becomes this node's output. Reads{' '}
+                  <code className="text-slate-400">input</code>,{' '}
+                  <code className="text-slate-400">inputs</code>,{' '}
+                  <code className="text-slate-400">nodes</code> and{' '}
+                  <code className="text-slate-400">vars</code>.
+                </p>
+                <ul className="space-y-0.5 pl-3">
+                  <li>
+                    <code className="text-slate-400">get(input, "score")</code> — pull a field
+                    out of the JSON a model returned
+                  </li>
+                  <li>
+                    <code className="text-slate-400">words(input)</code> — how long the answer
+                    was, as a number
+                  </li>
+                  <li>
+                    <code className="text-slate-400">trim(lower(input))</code> — fold it before
+                    anything downstream reads it
+                  </li>
+                  <li>
+                    <code className="text-slate-400">
+                      if(get(input, "score") {'>'} vars.threshold, "keep", "drop")
+                    </code>{' '}
+                    — decide without branching
+                  </li>
+                </ul>
+                <p>
+                  Functions:{' '}
+                  <code className="text-slate-400">{CONDITION_VOCABULARY.join(', ')}</code>, plus{' '}
+                  <code className="text-slate-400">length</code>,{' '}
+                  <code className="text-slate-400">if</code>,{' '}
+                  <code className="text-slate-400">and</code>,{' '}
+                  <code className="text-slate-400">or</code>,{' '}
+                  <code className="text-slate-400">not</code>.
                 </p>
               </div>
             </div>

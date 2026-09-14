@@ -118,3 +118,47 @@ test('a declared name nothing can read is reported against the workflow', () => 
   const result = validateWorkflow(withVars({ userPrompt: 'hi' }, { 'my-var': 1 }));
   assert.ok(result.warnings.some((w) => w.startsWith('Declared variable') && w.includes('my-var')));
 });
+
+// ---------- transform nodes ----------
+
+const withTransform = (config, variables = {}) =>
+  workflow(
+    [node('in', 'input'), node('t', 'transform', config), node('out', 'output')],
+    [edge('e1', 'in', 't'), edge('e2', 't', 'out')],
+    variables
+  );
+
+test('a transform reading its input is valid with no warnings', () => {
+  const result = validateWorkflow(withTransform({ expression: 'get(input, "score")' }));
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('a transform with no expression warns', () => {
+  const result = validateWorkflow(withTransform({}));
+  assert.ok(result.warnings.some((w) => w.includes('Transform node "t" has no expression')));
+});
+
+test('a transform expression that does not parse is caught before the run', () => {
+  const result = validateWorkflow(withTransform({ expression: 'get(input, ' }));
+  assert.ok(
+    result.warnings.some((w) => w.includes('Transform node "t"') && w.includes('does not parse'))
+  );
+});
+
+test('a transform reading a name nothing supplies is caught', () => {
+  const result = validateWorkflow(withTransform({ expression: 'mystery + 1' }));
+  assert.ok(result.warnings.some((w) => w.includes('reads "mystery"')));
+});
+
+test('a transform reading an undeclared variable warns that it carries nothing', () => {
+  const result = validateWorkflow(withTransform({ expression: 'vars.threshold' }));
+  assert.ok(
+    result.warnings.some((w) => w.includes('vars.threshold') && w.includes('carries nothing'))
+  );
+});
+
+test('transform is a known node type, not an unknown one', () => {
+  const result = validateWorkflow(withTransform({ expression: 'input' }));
+  assert.deepEqual(result.errors, []);
+});
