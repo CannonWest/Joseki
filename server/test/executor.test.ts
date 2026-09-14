@@ -159,6 +159,56 @@ test('{{input}} in a prompt is the output on the arrow into it', async () => {
   assert.equal(h.llm.calls[0].userPrompt, 'Summarize: the article');
 });
 
+test('{{vars.x}} in a prompt is what the workflow declared', async () => {
+  const wf = linear();
+  wf.variables = { tone: 'dry' };
+  const draft = wf.nodes.find((n) => n.id === 'draft')!;
+  (draft.data.config as any).userPrompt = 'Summarize in a {{vars.tone}} tone: {{input}}';
+  const h = harness(wf, { inputs: { in: 'the article' } });
+  await h.run();
+  assert.equal(h.llm.calls[0].userPrompt, 'Summarize in a dry tone: the article');
+});
+
+test('a workflow that declares nothing renders {{vars.x}} as empty rather than failing', async () => {
+  const wf = linear();
+  const draft = wf.nodes.find((n) => n.id === 'draft')!;
+  (draft.data.config as any).userPrompt = 'Tone: {{vars.tone}}.';
+  const h = harness(wf, { inputs: { in: 'x' } });
+  await h.run();
+  assert.equal(h.llm.calls[0].userPrompt, 'Tone: .');
+});
+
+test('a run may be given variables of its own, overriding what the workflow declares', async () => {
+  const wf = linear();
+  wf.variables = { tone: 'dry' };
+  const draft = wf.nodes.find((n) => n.id === 'draft')!;
+  (draft.data.config as any).userPrompt = '{{vars.tone}}';
+  const h = harness(wf, { inputs: { in: 'x' }, variables: { tone: 'florid' } });
+  await h.run();
+  assert.equal(h.llm.calls[0].userPrompt, 'florid');
+});
+
+test('a branch reads a declared number as a number', async () => {
+  // Declared values are not coerced to text on the way in: 10 > 9 numerically,
+  // where "10" > "9" — the comparison text would give — is false.
+  const wf = workflow(
+    'branching',
+    [
+      node('in', 'input', { defaultValue: 'x' }),
+      node('gate', 'branch', { condition: 'vars.threshold > 9' }),
+      node('hi', 'output'),
+      node('lo', 'output')
+    ],
+    [edge('in', 'gate'), edge('gate', 'hi', 'true'), edge('gate', 'lo', 'false')]
+  );
+  wf.variables = { threshold: 10 };
+  const h = harness(wf);
+  const ctx = await h.run();
+  assert.equal(ctx.gate.output, 'true');
+  assert.ok(ctx.hi, 'the true arrow should have fired');
+  assert.ok(!ctx.lo, 'the false arrow should have been skipped');
+});
+
 test('a required input with no value fails the run at that node', async () => {
   const wf = linear();
   wf.nodes[0] = node('in', 'input', { required: true });

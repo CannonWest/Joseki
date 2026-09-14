@@ -1,5 +1,6 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from './index';
 import { conditionParseError, conditionVariables, CONDITION_VOCABULARY } from './conditions';
+import { variableNameError, VARIABLES_SCOPE } from './variables';
 
 export interface WorkflowValidation {
   /** True when there are no errors. Warnings never make a workflow invalid. */
@@ -33,6 +34,14 @@ const RETIRED_NODE_TYPES: Readonly<Record<string, string>> = {
 // Handlebars references into execution context: {{nodes.<id>.output}},
 // {{#with nodes.<id>}}, {{#each nodes.<id>.output}} ...
 const TEMPLATE_NODE_REF = /\{\{[#/]?\s*(?:with|each|if|unless)?\s*nodes\.([^\s.}]+)/g;
+
+// The same, for a declared variable: {{vars.tone}}, {{#if vars.strict}}.
+const TEMPLATE_VARS_REF = /\{\{[#/]?\s*(?:with|each|if|unless)?\s*vars\.([^\s.}]+)/g;
+
+// A declared variable read by a condition — `vars.threshold > 0.5`. The parser
+// reports only `vars` as a free name, whatever member is walked, so the name
+// being read has to be recovered from the text.
+const CONDITION_VARS_REF = /\bvars\.([A-Za-z_][A-Za-z0-9_]*)/g;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -96,6 +105,15 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
 
   if (nodes.length === 0) {
     warnings.push('Workflow has no nodes');
+  }
+
+  // A declared name a prompt or a condition cannot read is worth saying early:
+  // the variable is visible in the panel and reachable from nothing, and a
+  // condition that reaches for it reads nothing rather than failing.
+  const declared = new Set<string>(Object.keys(workflow.variables ?? {}));
+  for (const name of declared) {
+    const problem = variableNameError(name);
+    if (problem) warnings.push(`Declared variable ${problem}`);
   }
 
   const nodeIds = new Set<string>();
@@ -173,11 +191,11 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
       case 'prompt':
         if (!config.model) warnings.push(`Prompt node "${node.id}" has no model`);
         if (!config.userPrompt) warnings.push(`Prompt node "${node.id}" has an empty user prompt`);
-        checkTemplateRefs(node.id, [config.systemPrompt, config.userPrompt], nodeIds, warnings);
+        checkTemplateRefs(node.id, [config.systemPrompt, config.userPrompt], nodeIds, declared, warnings);
         break;
       case 'branch':
         if (!config.condition) warnings.push(`Branch node "${node.id}" has no condition`);
-        else checkCondition(node.id, String(config.condition), nodeIds, warnings);
+        else checkCondition(node.id, String(config.condition), nodeIds, declared, warnings);
         checkBranchArrows(node.id, validEdges, warnings);
         break;
       case 'human_gate':
@@ -198,7 +216,7 @@ function isReworkEdge(edge: WorkflowEdge, nodeById: Map<string, WorkflowNode>): 
 }
 
 /** The names the executor puts in scope for every condition, whatever the graph. */
-const CONDITION_SCOPE: ReadonlySet<string> = new Set(['input', 'inputs', 'nodes']);
+const CONDITION_SCOPE: ReadonlySet<string> = new Set(['input', 'inputs', 'nodes', VARIABLES_SCOPE]);
 
 /**
  * A condition the author cannot run yet: it does not parse, or it reads a name
@@ -214,6 +232,7 @@ function checkCondition(
   nodeId: string,
   condition: string,
   nodeIds: Set<string>,
+  declared: Set<string>,
   warnings: string[]
 ): void {
   const parseError = conditionParseError(condition);
@@ -227,10 +246,22 @@ function checkCondition(
   for (const name of unknown) {
     warnings.push(
       `Branch node "${nodeId}" reads "${name}", which nothing supplies. ` +
-      `A condition can use input, inputs, nodes and the functions ` +
+      `A condition can use input, inputs, nodes, vars and the functions ` +
       `${CONDITION_VOCABULARY.join(', ')}; reach a node whose id has a hyphen with ` +
       `get(nodes, "the-id").`
     );
+  }
+  // An undeclared variable is not a free name — `vars` is in scope and the
+  // member is simply missing, so the condition parses, evaluates to nothing,
+  // and every comparison against it reads false. Silent, and always the same
+  // way, which is exactly the kind of thing to say at edit time.
+  for (const match of condition.matchAll(CONDITION_VARS_REF)) {
+    if (!declared.has(match[1])) {
+      warnings.push(
+        `Branch node "${nodeId}" reads vars.${match[1]}, which the workflow does not declare: ` +
+        `it reads as nothing, so the comparison is false whatever the run does`
+      );
+    }
   }
 }
 
@@ -279,6 +310,7 @@ function checkTemplateRefs(
   nodeId: string,
   templates: unknown[],
   nodeIds: Set<string>,
+  declared: Set<string>,
   warnings: string[]
 ): void {
   for (const template of templates) {
@@ -287,6 +319,19 @@ function checkTemplateRefs(
       const ref = match[1];
       if (!nodeIds.has(ref)) {
         warnings.push(`Node "${nodeId}" references unknown node "${ref}" in a template`);
+      }
+    }
+    // Handlebars renders a missing variable as the empty string, so an
+    // undeclared one reaches the model as a hole in the prompt rather than as
+    // an error — the model answers anyway, and the prompt was never what the
+    // author wrote.
+    for (const match of template.matchAll(TEMPLATE_VARS_REF)) {
+      const ref = match[1];
+      if (!declared.has(ref)) {
+        warnings.push(
+          `Node "${nodeId}" reads {{vars.${ref}}}, which the workflow does not declare: ` +
+          `it renders as nothing`
+        );
       }
     }
   }

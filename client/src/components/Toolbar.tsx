@@ -12,6 +12,8 @@ interface ToolbarProps {
   onValidate: () => void;
   onExport: () => void;
   onImport: () => void;
+  onVariables: () => void;
+  variableCount: number;
 }
 
 const secondaryButton =
@@ -30,7 +32,9 @@ export function Toolbar({
   onOpen,
   onValidate,
   onExport,
-  onImport
+  onImport,
+  onVariables,
+  variableCount
 }: ToolbarProps) {
   return (
     <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
@@ -55,6 +59,13 @@ export function Toolbar({
       </button>
       <button onClick={onValidate} className={secondaryButton} title="Check the workflow for problems">
         Validate
+      </button>
+      <button
+        onClick={onVariables}
+        className={secondaryButton}
+        title="Declare values every node in the run can read"
+      >
+        Variables{variableCount > 0 && <span className="ml-1.5 text-slate-500">{variableCount}</span>}
       </button>
       <button onClick={onExport} className={secondaryButton} title="Save and download this workflow as JSON">
         Export

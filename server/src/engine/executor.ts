@@ -74,6 +74,13 @@ export interface ExecutionOptions {
   context?: ExecutionContext;
   /** Values for input nodes, by node id. Falls back to each node's defaultValue. */
   inputs?: Record<string, unknown>;
+  /**
+   * The declared variables for this run, overriding the workflow's own. Left
+   * out, the run reads what the workflow declares — which is the usual case;
+   * this exists so a caller can run one workflow against different constants
+   * without editing it.
+   */
+  variables?: Record<string, unknown>;
   parentExecutionId?: string;
   /** Where human gates wait for their decision. Defaults to the shared registry. */
   gates?: GateRegistry;
@@ -176,6 +183,14 @@ export class WorkflowExecutor {
   ): Promise<ExecutionContext> {
     const context: ExecutionContext = options.context || {};
     const nodeMap = new Map(workflow.nodes.map(n => [n.id, n]));
+
+    // Declared variables are constant for the whole run, so they are resolved
+    // once here rather than re-read per node: a workflow edited mid-run must
+    // not change what the nodes still to come are reading.
+    const runOptions: ExecutionOptions = {
+      ...options,
+      variables: options.variables ?? workflow.variables ?? {}
+    };
 
     const incoming = new Map<string, WorkflowEdge[]>();
     const outgoing = new Map<string, WorkflowEdge[]>();
@@ -303,7 +318,7 @@ export class WorkflowExecutor {
       };
 
       const work = (async () => {
-        const { trace, selectedHandle, decision } = await this.runNode(node, inputs, context, run, options, record);
+        const { trace, selectedHandle, decision } = await this.runNode(node, inputs, context, run, runOptions, record);
         record(trace);
 
         // Superseded while it ran: the lap it belonged to has been thrown away.
@@ -485,6 +500,7 @@ export class WorkflowExecutor {
             node,
             inputs,
             context,
+            options.variables ?? {},
             options.onStreamToken
           );
           output = promptResult.output;
@@ -495,7 +511,7 @@ export class WorkflowExecutor {
         }
 
         case 'branch':
-          output = await this.executeBranchNode(node, inputs, context);
+          output = await this.executeBranchNode(node, inputs, context, options.variables ?? {});
           selectedHandle = output;
           // The condition as it reads right now. A workflow edited later must
           // not change what this run says it decided on.
@@ -593,6 +609,7 @@ export class WorkflowExecutor {
     node: WorkflowNode,
     inputs: NodeInput[],
     context: ExecutionContext,
+    variables: Record<string, unknown>,
     onStreamToken?: (nodeId: string, token: string) => void
   ): Promise<{ output: string; tokenUsage: any; model: string; cost?: number }> {
     const config = node.data.config as any;
@@ -601,7 +618,7 @@ export class WorkflowExecutor {
     const systemTemplate = Handlebars.compile(config.systemPrompt, TEMPLATE_OPTIONS);
     const userTemplate = Handlebars.compile(config.userPrompt, TEMPLATE_OPTIONS);
 
-    const data = this.templateData(inputs, context);
+    const data = this.templateData(inputs, context, variables);
     const systemPrompt = systemTemplate(data);
     const userPrompt = userTemplate(data);
 
@@ -623,27 +640,45 @@ export class WorkflowExecutor {
 
   /**
    * What a template can see: `input` (the first arrow's output, as text),
-   * `inputs` (every arrow's output by source node id) and `nodes` (the whole
-   * run so far, for {{nodes.<id>.output}} and {{nodes.<gate>.decision.note}}).
+   * `inputs` (every arrow's output by source node id), `nodes` (the whole
+   * run so far, for {{nodes.<id>.output}} and {{nodes.<gate>.decision.note}})
+   * and `vars` (what the author declared, the same for every node).
+   *
+   * Three of them are what the run made; `vars` is what it was given. It is
+   * always present, empty when nothing was declared, so `{{vars.x}}` renders
+   * blank rather than failing on a workflow that declares nothing.
    */
-  private templateData(inputs: NodeInput[], context: ExecutionContext) {
+  private templateData(
+    inputs: NodeInput[],
+    context: ExecutionContext,
+    variables: Record<string, unknown>
+  ) {
     const byNode: Record<string, unknown> = {};
     for (const i of inputs) byNode[i.nodeId] = i.output;
     return {
       input: inputs.length ? asText(inputs[0].output) : '',
       inputs: byNode,
-      nodes: context
+      nodes: context,
+      vars: variables
     };
   }
 
   /**
    * Decides which arrow out of a branch fires.
    *
-   * The condition is read against the same three names a template sees —
-   * `input`, `inputs` and `nodes` — so what a prompt interpolates and what a
-   * branch tests are the same thing said twice. `input` is text, because that
-   * is what a condition compares; `inputs` and `nodes` carry the raw outputs,
-   * so `get(nodes, "prompt-123.score")` can reach a field a model reported.
+   * The condition is read against the same four names a template sees —
+   * `input`, `inputs`, `nodes` and `vars` — so what a prompt interpolates and
+   * what a branch tests are the same thing said twice. `input` is text,
+   * because that is what a condition compares; `inputs` and `nodes` carry the
+   * raw outputs, so `get(nodes, "prompt-123.score")` can reach a field a model
+   * reported.
+   *
+   * `vars` carries the declared values **as declared** — a number stays a
+   * number, so `vars.threshold > 0.5` compares numerically rather than
+   * lexically. It is always in scope, empty when nothing was declared: a
+   * missing member reads as nothing and every comparison against it is false,
+   * which is the same thing a missing field does, whereas a missing `vars`
+   * itself would throw.
    *
    * Every node also keeps a flat name, which is how conditions were written
    * before there was a `nodes` object. Only ids the parser can read as a name
@@ -653,7 +688,8 @@ export class WorkflowExecutor {
   private async executeBranchNode(
     node: WorkflowNode,
     inputs: NodeInput[],
-    context: ExecutionContext
+    context: ExecutionContext,
+    variables: Record<string, unknown>
   ): Promise<string> {
     const config = node.data.config as any;
     const conditionStr: string = config.condition || 'true';
@@ -668,7 +704,8 @@ export class WorkflowExecutor {
       nodes: byNode,
       inputs: byInput,
       // What arrived on the first arrow into this node.
-      input: inputs.length ? asText(inputs[0].output) : ''
+      input: inputs.length ? asText(inputs[0].output) : '',
+      vars: variables
     };
 
     for (const [nodeId, output] of Object.entries(byNode)) {
