@@ -24,7 +24,7 @@ don't.
 
 ## Content Review Pipeline
 
-`example-content-review-pipeline` · the one **Try Example** opens
+`example-content-review-pipeline` · the branching example
 
 ```
         Article Text
@@ -208,8 +208,8 @@ which runs on a fresh database and an old one alike — not on every start, so a
 folder cleared on purpose does not fill back up. An example added in a later
 version therefore reaches an existing database only through **Restore** in the
 Open dialog's footer, which puts back whichever are missing and touches
-nothing that is there; **Try Example** does the same before opening the
-pipeline. Edit one and the edit is kept. Delete one and it stays deleted.
+nothing that is there. Edit one and the edit is kept. Delete one and it stays
+deleted.
 
 Each example is pinned by tests. `shared/test/examples.test.cjs` checks that
 every shipped example validates with no errors and no warnings and lives in

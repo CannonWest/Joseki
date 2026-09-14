@@ -31,13 +31,13 @@ export function blankWorkflow(folder: string): Workflow {
 
 interface WorkflowState {
   workflows: Workflow[];
-  /** Every folder there is; the welcome screen counts them. */
+  /** Every folder there is; the Open dialog's move targets come from it. */
   folders: Folder[];
   currentWorkflow: Workflow | null;
   isLoading: boolean;
   error: string | null;
 
-  /** Reads every workflow and every folder — the counts the welcome screen shows. */
+  /** Reads every workflow and every folder — the Open dialog lists them and computes missing examples. */
   loadWorkflows: () => Promise<void>;
   loadWorkflow: (id: string) => Promise<void>;
   setCurrentWorkflow: (workflow: Workflow | null) => void;

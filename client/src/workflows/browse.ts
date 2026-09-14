@@ -74,9 +74,3 @@ export function missingExamples(workflows: Array<{ id: string }>): string[] {
   const present = new Set(workflows.map((workflow) => workflow.id));
   return SHIPPED_EXAMPLE_IDS.filter((id) => !present.has(id));
 }
-
-/** `2 workflows · 1 folder`, for the welcome screen's card. */
-export function describeLibrary(workflowCount: number, folderCount: number): string {
-  const workflows = count(workflowCount, 'workflow');
-  return folderCount ? `${workflows} · ${count(folderCount, 'folder')}` : workflows;
-}

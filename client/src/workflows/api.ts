@@ -3,7 +3,7 @@ import type { Folder, FolderListing, Workflow } from '@joseki/shared';
 /**
  * The workflow library over HTTP: folders, and the things done to a
  * workflow that are not editing it. The canvas keeps its own save path in
- * the store; this is what the Open dialog and the welcome screen call.
+ * the store; this is what the Open dialog calls.
  *
  * Every failure is thrown as an Error whose message is the server's, so a
  * dialog can show it as it is.

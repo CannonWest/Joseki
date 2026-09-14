@@ -58,7 +58,7 @@ joseki/
 4. **Validate**: Click **Validate** to check for problems before running
 5. **Execute**: Press `Cmd+Enter` to run the workflow (it is saved and validated first)
 6. **Share**: **Export** downloads the workflow as JSON; **Import** loads one from a file or pasted JSON
-7. **Open**: browse your workflows and folders — open, rename, move and delete them — from the welcome screen or the toolbar
+7. **Open**: browse your workflows and folders — open, rename, move and delete them — from the toolbar
 
 ## Workflow files
 
@@ -114,7 +114,7 @@ Joseki only makes chat completions, so `/api/models` leaves them out rather than
 
 ## Folders
 
-Workflows live in folders, the way files do. **Open Existing** on the welcome screen — and **Open** in the editor toolbar — is the way in: folders to walk into, workflows to open, a breadcrumb back up, and on each row **Rename**, **Move** and **Delete**, done in the row rather than in a second dialog. **New folder** makes one where you are. **+ New workflow** starts one where you are, and that is the only way a workflow starts anywhere but the top level: **Create New Workflow** on the welcome screen and **Import** both save to the root.
+Workflows live in folders, the way files do. **Open** in the editor toolbar is the way in: folders to walk into, workflows to open, a breadcrumb back up, and on each row **Rename**, **Move** and **Delete**, done in the row rather than in a second dialog. **New folder** makes one where you are. **+ New workflow** starts one where you are, and that is the only way a workflow starts anywhere but the top level — the app opens on a fresh workflow in the root, and **Import** also saves to the root.
 
 A folder is named by its path — `Examples`, `Clients/Acme` — and the root is the empty path. A folder is a row of its own, so an empty one stays until it is deleted; a workflow names the folder it is in, and a folder a workflow is saved into is made if it is not there yet. A name cannot contain a slash, and two folders in one place cannot differ only by case.
 
@@ -126,11 +126,11 @@ Opening another workflow from the editor saves the one on the canvas first, the 
 
 The `Examples` folder holds the three workflows Joseki ships, one per shape. Each is written up in [docs/EXAMPLES.md](docs/EXAMPLES.md) — the shape, every node, what it teaches, how to run it, and what a run costs.
 
-- **Content Review Pipeline** — the branching one, and the one **Try Example** opens: draft → quality branch → revision → merge → an editor gate that can send the work back with a note the next draft reads.
+- **Content Review Pipeline** — the branching one: draft → quality branch → revision → merge → an editor gate that can send the work back with a note the next draft reads.
 - **Translation Round-Trip** — the straight line: English → French → English → what drifted. Shows the two ways a prompt reads what came before it, `{{input}}` and `{{nodes.<id>.output}}`; runs from chat too.
 - **Best of Four** — the fan: one prompt to four cheap models at once, and a blind judge that reprints the best answer in full. Shows the third way — naming every node when several arrows arrive; runs from chat too.
 
-They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. **Try Example** does the same before opening the pipeline. Neither touches an example that is there.
+They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. Neither touches an example that is there.
 
 ### API
 
@@ -243,7 +243,7 @@ The execution log's **left edge is a resize handle**: pull it left to widen the 
 
 The server holds multi-turn conversations against any model on [OpenRouter](https://openrouter.ai), streaming replies over socket.io and storing every message in SQLite. Set `OPENROUTER_API_KEY` to enable it; without a key the workflow editor works as before and the chat routes answer `503`.
 
-The client's **Chat** view (the Chat card on the welcome screen, or the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and a per-reply line of model, the provider that served it, tokens (thinking tokens named), cost and latency, a searchable model picker over the catalog, and per-conversation settings — model, system prompt, temperature, max tokens, plus **Routing** (the model's provider roster with an order / only / skip pick per provider, and the gateway's routing preferences), **Sampling** and **Reasoning** sections that show only the controls the chosen model supports. A reply the gateway reported no cost for shows an estimate from catalog pricing, marked `~`; the header carries the conversation's spend across every branch.
+The client's **Chat** view (the Chat button in the editor toolbar) is the front end for it: a conversation list, a streaming markdown thread with reasoning traces and a per-reply line of model, the provider that served it, tokens (thinking tokens named), cost and latency, a searchable model picker over the catalog, and per-conversation settings — model, system prompt, temperature, max tokens, plus **Routing** (the model's provider roster with an order / only / skip pick per provider, and the gateway's routing preferences), **Sampling** and **Reasoning** sections that show only the controls the chosen model supports. A reply the gateway reported no cost for shows an estimate from catalog pricing, marked `~`; the header carries the conversation's spend across every branch.
 
 Messages form a tree: each message records its parent, so a conversation can branch (alternative replies, edits) while `activeLeafId` marks the branch in view. The path from the root to the active leaf is the history sent to the model. In the client, **Retry** on a reply and **Edit** on a message each send the user message again under the same parent — a new branch with its own reply — and a message with alternatives shows a **‹ 2/3 ›** switch that moves `activeLeafId` to that branch's newest leaf.
 

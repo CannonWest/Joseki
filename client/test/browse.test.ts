@@ -5,7 +5,6 @@ import {
   deleteFolderWarning,
   deleteWorkflowWarning,
   describeFolder,
-  describeLibrary,
   describeWorkflow,
   missingExamples,
   moveTargets
@@ -80,10 +79,4 @@ test('the examples missing from the library are the ones Restore would bring bac
   assert.deepEqual(missingExamples(SHIPPED_EXAMPLE_IDS.map((id) => ({ id }))), []);
   const [first, ...rest] = SHIPPED_EXAMPLE_IDS;
   assert.deepEqual(missingExamples([{ id: first }, { id: 'mine' }]), rest);
-});
-
-test('the welcome card counts workflows, and folders when there are any', () => {
-  assert.equal(describeLibrary(1, 0), '1 workflow');
-  assert.equal(describeLibrary(3, 1), '3 workflows · 1 folder');
-  assert.equal(describeLibrary(0, 2), '0 workflows · 2 folders');
 });
