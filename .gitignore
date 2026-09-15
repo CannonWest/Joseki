@@ -47,3 +47,6 @@ tmp/
 
 # Claude Code tooling
 .claude/
+
+# OpenCode tooling
+.opencode/
