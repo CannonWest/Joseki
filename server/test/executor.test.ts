@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBestOfFour, createExampleWorkflow, MAX_ATTEMPTS } from '@joseki/shared';
+import { createBestOfFour, createExampleWorkflow, createTicketTriage, MAX_ATTEMPTS } from '@joseki/shared';
 import type {
   ChatParams,
   Workflow,
@@ -986,6 +986,73 @@ test('best of four sends one prompt to four models and hands all four to the jud
   // What the workflow produces is the judge's pick.
   assert.equal(ctx.bestof_output.output, ctx.bestof_judge.output);
   assert.equal(h.completed.at(-1)?.nodeId, 'bestof_output');
+});
+
+/**
+ * Stubs the classify call with a fixed urgency; every other call echoes as
+ * usual. Recorded onto `this.calls` the same way the real StubLLM does, so a
+ * test can still inspect what each draft prompt was actually sent.
+ */
+function classifyingAt(urgency: number) {
+  return async function (this: StubLLM, p: Call) {
+    this.calls.push({ model: p.model, systemPrompt: p.systemPrompt, userPrompt: p.userPrompt, params: p.params });
+    if (p.systemPrompt.includes('triage incoming support tickets')) {
+      return {
+        content: JSON.stringify({ urgency, category: 'Test', summary: 'stubbed' }),
+        tokenUsage: { prompt: 1, completion: 1, total: 2 },
+        model: p.model
+      };
+    }
+    return {
+      content: `<${p.model}: ${p.userPrompt}>`,
+      tokenUsage: { prompt: 1, completion: 1, total: 2 },
+      model: p.model
+    };
+  };
+}
+
+test('an urgent ticket becomes P1: only the escalate draft runs, and it reads the priority the transform computed', async () => {
+  const wf = createTicketTriage();
+  const h = harness(wf, { inputs: { triage_input: 'payment API down, losing money right now' } });
+  h.llm.generate = classifyingAt(0.95);
+  const ctx = await h.run();
+
+  // One model call for the raw signal; everything after is the transform and
+  // the branch, neither of which touches a model.
+  assert.equal(ctx.triage_priority.output, 'P1');
+  assert.equal(ctx.triage_gate.output, 'true');
+  assert.equal(h.completed.find((c) => c.nodeId === 'triage_standard')?.status, 'skipped');
+  assert.ok(ctx.triage_escalate.output, 'the escalate draft should have run');
+
+  const escalateCall = h.llm.calls.find((c) => c.userPrompt.includes('Priority:'));
+  assert.ok(escalateCall?.userPrompt.includes('Priority: P1'), 'the escalate draft should see the computed label');
+  assert.equal(ctx.triage_output.output, ctx.triage_escalate.output);
+});
+
+test('a routine ticket becomes P3: only the standard draft runs', async () => {
+  const wf = createTicketTriage();
+  const h = harness(wf, { inputs: { triage_input: 'any plans for dark mode? no rush' } });
+  h.llm.generate = classifyingAt(0.05);
+  const ctx = await h.run();
+
+  assert.equal(ctx.triage_priority.output, 'P3');
+  assert.equal(ctx.triage_gate.output, 'false');
+  assert.equal(h.completed.find((c) => c.nodeId === 'triage_escalate')?.status, 'skipped');
+  assert.ok(ctx.triage_standard.output, 'the standard draft should have run');
+  assert.equal(ctx.triage_output.output, ctx.triage_standard.output);
+});
+
+test('the same urgency always lands on the same priority, whatever the declared thresholds allow between P1 and P3', async () => {
+  const wf = createTicketTriage();
+  wf.variables = { highThreshold: 0.6, lowThreshold: 0.6 };
+  const h = harness(wf, { inputs: { triage_input: 'ticket' } });
+  h.llm.generate = classifyingAt(0.6);
+  const ctx = await h.run();
+
+  // 0.6 is not > 0.6 either way, so with both thresholds pinned at 0.6 the
+  // ticket falls all the way through to P3 — the boundary is exclusive, and
+  // moving the thresholds is the only thing that ever changes the answer.
+  assert.equal(ctx.triage_priority.output, 'P3');
 });
 
 // ==================== what a run records about its decisions ====================

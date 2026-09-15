@@ -8,7 +8,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 - **Node Types**: Prompt, Branch, Transform, Aggregate, Human Gate
 - **Real-time Execution**: WebSocket streaming with live token output; nodes that don't depend on each other run at once
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
-- **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
+- **Folders**: Workflows live in folders, like files; the four shipped examples come in one called Examples
 - **Variables**: Declare values once and read them from every prompt and condition in the run
 - **Model Comparison**: Fan one prompt out to several models and read the answers together — Best of Four in Examples is the shape
 - **Dark Mode**: Optimized for long coding sessions
@@ -125,11 +125,12 @@ Opening another workflow from the editor saves the one on the canvas first, the 
 
 ### Examples
 
-The `Examples` folder holds the three workflows Joseki ships, one per shape. Each is written up in [docs/EXAMPLES.md](docs/EXAMPLES.md) — the shape, every node, what it teaches, how to run it, and what a run costs.
+The `Examples` folder holds the four workflows Joseki ships, one per shape. Each is written up in [docs/EXAMPLES.md](docs/EXAMPLES.md) — the shape, every node, what it teaches, how to run it, and what a run costs.
 
 - **Content Review Pipeline** — the branching one: draft → quality branch → revision → merge → an editor gate that can send the work back with a note the next draft reads.
 - **Translation Round-Trip** — the straight line: English → French → English → what drifted. Shows the two ways a prompt reads what came before it, `{{input}}` and `{{nodes.<id>.output}}`; runs from chat too.
 - **Best of Four** — the fan: one prompt to four cheap models at once, and a blind judge that reprints the best answer in full. Shows the third way — naming every node when several arrows arrive; runs from chat too.
+- **Ticket Triage** — the deterministic gate: one model call classifies a ticket, a transform buckets it into P1/P2/P3 off two declared variables, and a branch routes to an escalation draft or a routine one. Shows what a transform is for — multi-way computation a boolean branch can't produce in one step — and that the same ticket always lands on the same priority; runs from chat too.
 
 They are files like any other: edit one and the edit is kept; delete one and it stays deleted. They are put there once, when the database is created, not on every start — so an example added to a later version reaches an existing database through **Restore** in the Open dialog's footer, which puts back whichever are missing. Neither touches an example that is there.
 

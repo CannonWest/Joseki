@@ -1,24 +1,25 @@
 # The shipped examples
 
-Joseki ships three workflows, in a folder called `Examples`. There is one per
-shape — a branch with a loop, a straight line, a fan — and each exists to show
-one thing about how a workflow reads what came before it. This is the write-up
-of each: the shape, every node, what it teaches, how to run it, and what a run
-costs. The README has the one-line version.
+Joseki ships four workflows, in a folder called `Examples`. There is one per
+shape — a branch with a loop, a straight line, a fan, a deterministic gate —
+and each exists to show one thing about how a workflow reads what came before
+it. This is the write-up of each: the shape, every node, what it teaches, how
+to run it, and what a run costs. The README has the one-line version.
 
 They are built in code, not stored as files: `shared/src/exampleWorkflow.ts`,
-`shared/src/translationRoundTrip.ts` and `shared/src/bestOfFour.ts`, registered
-in `shared/src/examples.ts` (`SHIPPED_EXAMPLE_IDS`, `shippedExamples()`). Their
-ids are stable across versions, which is how Restore knows one is missing. Their
-node ids carry no hyphen, on purpose: a hyphen is subtraction to the branch
-condition parser, so an id it can read as a name is the better habit even in an
-example that has no branch.
+`shared/src/translationRoundTrip.ts`, `shared/src/bestOfFour.ts` and
+`shared/src/ticketTriage.ts`, registered in `shared/src/examples.ts`
+(`SHIPPED_EXAMPLE_IDS`, `shippedExamples()`). Their ids are stable across
+versions, which is how Restore knows one is missing. Their node ids carry no
+hyphen, on purpose: a hyphen is subtraction to the branch condition parser, so
+an id it can read as a name is the better habit even in an example that has no
+branch.
 
 Every model id is an OpenRouter slug — there is no other provider — and the
 default for a new prompt node is `DEFAULT_WORKFLOW_MODEL`, `openai/gpt-4o-mini`.
 
-Figures below are frozen **2026-09-13**, from real runs. Prices move; shapes
-don't.
+Figures below are frozen **2026-09-13** for the first three examples and
+**2026-09-15** for Ticket Triage, from real runs. Prices move; shapes don't.
 
 ---
 
@@ -198,6 +199,81 @@ lists — and keep its letter. Swap the judge; watch whether a judge from inside
 the field favours its own house. Add a fifth: one prompt node, two edges, and
 an `--- Answer E ---` block in the judge's user prompt. Change the output shape
 in the judge's system prompt to get a ranking instead of a winner.
+
+---
+
+## Ticket Triage
+
+`example-ticket-triage` · the deterministic-gate example
+
+```
+        Support Ticket
+             │
+          Classify
+             │
+          Priority (transform)
+             │
+           Gate (branch)
+      true │       │ false
+     Escalate    Standard
+      Draft       Draft
+          └───┬───┘
+            Merge
+              │
+        Response Draft
+```
+
+| id | type | label | what it does |
+|---|---|---|---|
+| `triage_input` | input | Support Ticket | required text — the customer's ticket |
+| `triage_classify` | prompt | Classify | `gpt-4o-mini`, temperature 0.2. Reads the ticket and answers strict JSON: `{"urgency": 0.0–1.0, "category": "...", "summary": "..."}`. The only model call in the workflow. |
+| `triage_priority` | transform | Priority | `if(get(input, "urgency") > vars.highThreshold, "P1", if(get(input, "urgency") > vars.lowThreshold, "P2", "P3"))`. Pulls the number out of the classifier's JSON and buckets it into three labels off two declared variables. |
+| `triage_gate` | branch | Gate | condition `nodes.triage_priority == "P1"`. Routes P1 to the escalation draft; P2 and P3 both take the standard one. |
+| `triage_escalate` | prompt | Escalate Draft | temperature 0.4. Reads `{{nodes.triage_priority.output}}`, `{{nodes.triage_classify.output}}` and `{{nodes.triage_input.output}}` — never `{{input}}`, which downstream of a branch would be the branch's own `"true"`/`"false"`, not the ticket. |
+| `triage_standard` | prompt | Standard Draft | temperature 0.6. Same reasoning, minus the priority label — a routine reply doesn't need to say "P3" to the customer. |
+| `triage_merge` | aggregate | Merge | `concat`, `\n`. Waits for whichever draft the gate chose. |
+| `triage_output` | output | Response Draft | markdown |
+
+Two declared variables: `highThreshold: 0.75`, `lowThreshold: 0.35`.
+
+**What it teaches.** What a transform is for, and why it earns its place
+beside a branch rather than duplicating one. A branch condition can already
+reach into a model's JSON and read a declared variable — `get(input,
+"urgency") > vars.highThreshold` would parse and run fine as a branch
+condition on its own — so extraction alone is not the reason to reach for
+this node. The reason is the **nested `if()`**: three labels out of one
+computed value, which a single true/false branch cannot produce in one step.
+The label it computes is a normal node output like any other, read twice —
+once by the branch that routes on it, once by the escalation prompt that
+prints it back — and the model is asked exactly once, for the raw urgency
+number. Everything after that is arithmetic against `highThreshold` and
+`lowThreshold`: the same ticket, run any number of times, always lands on the
+same priority and takes the same path. Nudge a threshold and it flips,
+predictably, without ever asking the model to re-judge urgency.
+
+**How to run it.** From the editor, or from chat: no gate, so `run_workflow`
+with `"Examples/Ticket Triage"` and a `Support Ticket` input runs it end to
+end and returns whichever draft the gate chose.
+
+**What a run looks like.** Two real runs, one urgent and one routine:
+
+| ticket | urgency (model) | priority (transform) | path | wall-clock | cost |
+|---|---|---|---|---|---|
+| "production payment API returning 500s, losing live transactions" | 1.0 | P1 | Escalate Draft | 4.4 s | $0.00015, 302 tokens |
+| "any plans for dark mode? no rush at all" | 0.0 | P3 | Standard Draft | 3.3 s | $0.00015, 297 tokens |
+
+Two model calls either way — Classify plus whichever single draft the gate
+picked — and that pair is the entire cost of the run: the transform and the
+branch between them show `cost: 0` in the trace, not an estimate rounded down.
+
+**Knobs worth turning.** Lower `lowThreshold` or raise `highThreshold` in
+**Variables** and rerun the same ticket to watch P2 show up, or to watch a
+borderline ticket flip from P1 to P2 without the classifier being asked
+anything twice. Feed `{{nodes.triage_priority.output}}` into a third prompt
+that picks a cheaper model for P3 traffic and a stronger one for P1 — the
+label is there to be read by anything downstream, not only the gate. Try "any
+plans for dark mode? no rush at all" as the ticket text to see the P3 path
+directly.
 
 ---
 

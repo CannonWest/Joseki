@@ -7,9 +7,11 @@ const {
   CONTENT_REVIEW_PIPELINE_ID,
   TRANSLATION_ROUND_TRIP_ID,
   BEST_OF_FOUR_ID,
+  TICKET_TRIAGE_ID,
   createExampleWorkflow,
   createTranslationRoundTrip,
   createBestOfFour,
+  createTicketTriage,
   shippedExamples,
 } = require('../dist/index.js');
 
@@ -29,6 +31,7 @@ test('the shipped ids are the ids the examples are created under, and no two sha
   assert.equal(createExampleWorkflow().id, CONTENT_REVIEW_PIPELINE_ID);
   assert.equal(createTranslationRoundTrip().id, TRANSLATION_ROUND_TRIP_ID);
   assert.equal(createBestOfFour().id, BEST_OF_FOUR_ID);
+  assert.equal(createTicketTriage().id, TICKET_TRIAGE_ID);
 });
 
 test('the round trip is a straight line: no branch, no gate, so chat can run it', () => {
@@ -162,4 +165,61 @@ test('best of four is a straight fan — no gate — so chat can run it', () => 
   const judge = example.nodes.find((node) => node.id === 'bestof_judge');
   const candidate = candidatesOf(example)[0];
   assert.ok(judge.data.config.maxTokens > candidate.data.config.maxTokens);
+});
+
+test('ticket triage declares the two thresholds the priority transform reads', () => {
+  const example = createTicketTriage();
+  assert.deepEqual(example.variables, { highThreshold: 0.75, lowThreshold: 0.35 });
+
+  const priority = example.nodes.find((node) => node.id === 'triage_priority');
+  assert.equal(priority.type, 'transform');
+  assert.match(priority.data.config.expression, /vars\.highThreshold/);
+  assert.match(priority.data.config.expression, /vars\.lowThreshold/);
+});
+
+test('the priority transform can answer three ways, which the gate alone could not', () => {
+  const { evaluateCondition } = require('../dist/conditions.js');
+  const example = createTicketTriage();
+  const expression = example.nodes.find((node) => node.id === 'triage_priority').data.config.expression;
+  const vars = example.variables;
+
+  const at = (urgency) => evaluateCondition(expression, { vars, input: JSON.stringify({ urgency }) });
+  assert.equal(at(0.9), 'P1');
+  assert.equal(at(0.5), 'P2');
+  assert.equal(at(0.1), 'P3');
+});
+
+test('the gate routes on the transform\'s output, and both drafts read it too', () => {
+  const example = createTicketTriage();
+  const gate = example.nodes.find((node) => node.id === 'triage_gate');
+  assert.equal(gate.data.config.condition, 'nodes.triage_priority == "P1"');
+
+  const escalate = example.nodes.find((node) => node.id === 'triage_escalate');
+  const standard = example.nodes.find((node) => node.id === 'triage_standard');
+  assert.match(escalate.data.config.userPrompt, /\{\{nodes\.triage_priority\.output\}\}/);
+  // The standard reply doesn't need the label spelled out to the customer.
+  assert.ok(!standard.data.config.userPrompt.includes('triage_priority'));
+
+  // Downstream of a branch, {{input}} would be the branch's own "true"/"false" —
+  // so both drafts must name the nodes they actually want.
+  assert.ok(!escalate.data.config.userPrompt.includes('{{input}}'));
+  assert.ok(!standard.data.config.userPrompt.includes('{{input}}'));
+  assert.match(escalate.data.config.userPrompt, /\{\{nodes\.triage_input\.output\}\}/);
+  assert.match(standard.data.config.userPrompt, /\{\{nodes\.triage_input\.output\}\}/);
+});
+
+test('a join after the gate waits for exactly the path chosen, and only one path can reach output', () => {
+  const example = createTicketTriage();
+  assert.ok(example.edges.some((e) => e.source === 'triage_escalate' && e.target === 'triage_merge'));
+  assert.ok(example.edges.some((e) => e.source === 'triage_standard' && e.target === 'triage_merge'));
+  assert.ok(example.edges.some((e) => e.source === 'triage_merge' && e.target === 'triage_output'));
+  assert.ok(!example.nodes.some((node) => node.type === 'human_gate'));
+});
+
+test('ticket triage is gated but has no human gate, so chat can run it', () => {
+  const example = createTicketTriage();
+  const inputs = example.nodes.filter((node) => node.type === 'input');
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].data.label, 'Support Ticket');
+  assert.equal(inputs[0].data.config.required, true);
 });
