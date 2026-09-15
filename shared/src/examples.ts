@@ -14,19 +14,22 @@ import type { Workflow } from './index';
 import { CONTENT_REVIEW_PIPELINE_ID, createExampleWorkflow } from './exampleWorkflow';
 import { TRANSLATION_ROUND_TRIP_ID, createTranslationRoundTrip } from './translationRoundTrip';
 import { BEST_OF_FOUR_ID, createBestOfFour } from './bestOfFour';
+import { TICKET_TRIAGE_ID, createTicketTriage } from './ticketTriage';
 
-export { CONTENT_REVIEW_PIPELINE_ID, TRANSLATION_ROUND_TRIP_ID, BEST_OF_FOUR_ID };
+export { CONTENT_REVIEW_PIPELINE_ID, TRANSLATION_ROUND_TRIP_ID, BEST_OF_FOUR_ID, TICKET_TRIAGE_ID };
 export { createTranslationRoundTrip } from './translationRoundTrip';
 export { createBestOfFour } from './bestOfFour';
+export { createTicketTriage } from './ticketTriage';
 
 /** The ids the shipped examples are stored under. Stable across versions. */
 export const SHIPPED_EXAMPLE_IDS: readonly string[] = [
   CONTENT_REVIEW_PIPELINE_ID,
   TRANSLATION_ROUND_TRIP_ID,
-  BEST_OF_FOUR_ID
+  BEST_OF_FOUR_ID,
+  TICKET_TRIAGE_ID
 ];
 
 /** Fresh copies of every shipped example, each already placed in the Examples folder. */
 export function shippedExamples(): Workflow[] {
-  return [createExampleWorkflow(), createTranslationRoundTrip(), createBestOfFour()];
+  return [createExampleWorkflow(), createTranslationRoundTrip(), createBestOfFour(), createTicketTriage()];
 }
