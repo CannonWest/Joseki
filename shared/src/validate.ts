@@ -14,6 +14,7 @@ export interface WorkflowValidation {
 const NODE_TYPES: ReadonlySet<string> = new Set([
   'prompt',
   'branch',
+  'transform',
   'aggregate',
   'human_gate',
   'input',
@@ -198,6 +199,10 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidation {
         else checkCondition(node.id, String(config.condition), nodeIds, declared, warnings);
         checkBranchArrows(node.id, validEdges, warnings);
         break;
+      case 'transform':
+        if (!config.expression) warnings.push(`Transform node "${node.id}" has no expression`);
+        else checkTransform(node.id, String(config.expression), nodeIds, declared, warnings);
+        break;
       case 'human_gate':
         if (!validEdges.some((edge) => edge.source === node.id && edge.sourceHandle === 'fail')) {
           warnings.push(`Human gate "${node.id}" has no fail arrow: a rejection ends the run`);
@@ -235,31 +240,71 @@ function checkCondition(
   declared: Set<string>,
   warnings: string[]
 ): void {
-  const parseError = conditionParseError(condition);
+  checkExpression(nodeId, condition, nodeIds, declared, warnings, {
+    kind: 'Branch node',
+    what: 'a condition',
+    undeclared: 'it reads as nothing, so the comparison is false whatever the run does',
+  });
+}
+
+/**
+ * The same reading, for the expression a transform node carries. It is the
+ * one language — a transform is a condition that keeps its answer — so the
+ * checks are the same and only the wording differs.
+ */
+function checkTransform(
+  nodeId: string,
+  expression: string,
+  nodeIds: Set<string>,
+  declared: Set<string>,
+  warnings: string[]
+): void {
+  checkExpression(nodeId, expression, nodeIds, declared, warnings, {
+    kind: 'Transform node',
+    what: 'an expression',
+    undeclared: 'it computes to nothing, and carries nothing into everything downstream',
+  });
+}
+
+interface ExpressionWording {
+  kind: string;
+  what: string;
+  undeclared: string;
+}
+
+function checkExpression(
+  nodeId: string,
+  expression: string,
+  nodeIds: Set<string>,
+  declared: Set<string>,
+  warnings: string[],
+  wording: ExpressionWording
+): void {
+  const parseError = conditionParseError(expression);
   if (parseError) {
-    warnings.push(`Branch node "${nodeId}" has a condition that does not parse: ${parseError}`);
+    warnings.push(`${wording.kind} "${nodeId}" has ${wording.what} that does not parse: ${parseError}`);
     return;
   }
-  const unknown = conditionVariables(condition).filter(
+  const unknown = conditionVariables(expression).filter(
     (name) => !CONDITION_SCOPE.has(name) && !nodeIds.has(name) && !endsWithKnownNode(name, nodeIds)
   );
   for (const name of unknown) {
     warnings.push(
-      `Branch node "${nodeId}" reads "${name}", which nothing supplies. ` +
-      `A condition can use input, inputs, nodes, vars and the functions ` +
+      `${wording.kind} "${nodeId}" reads "${name}", which nothing supplies. ` +
+      `${wording.what[0].toUpperCase()}${wording.what.slice(1)} can use input, inputs, nodes, vars and the functions ` +
       `${CONDITION_VOCABULARY.join(', ')}; reach a node whose id has a hyphen with ` +
       `get(nodes, "the-id").`
     );
   }
   // An undeclared variable is not a free name — `vars` is in scope and the
-  // member is simply missing, so the condition parses, evaluates to nothing,
-  // and every comparison against it reads false. Silent, and always the same
-  // way, which is exactly the kind of thing to say at edit time.
-  for (const match of condition.matchAll(CONDITION_VARS_REF)) {
+  // member is simply missing, so the expression parses, evaluates to nothing,
+  // and says so silently. Always the same way, which is exactly the kind of
+  // thing to say at edit time.
+  for (const match of expression.matchAll(CONDITION_VARS_REF)) {
     if (!declared.has(match[1])) {
       warnings.push(
-        `Branch node "${nodeId}" reads vars.${match[1]}, which the workflow does not declare: ` +
-        `it reads as nothing, so the comparison is false whatever the run does`
+        `${wording.kind} "${nodeId}" reads vars.${match[1]}, which the workflow does not declare: ` +
+        wording.undeclared
       );
     }
   }

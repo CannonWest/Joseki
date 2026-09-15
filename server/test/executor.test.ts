@@ -209,6 +209,84 @@ test('a branch reads a declared number as a number', async () => {
   assert.ok(!ctx.lo, 'the false arrow should have been skipped');
 });
 
+test('a transform computes without a model and carries the answer downstream', async () => {
+  const wf = workflow(
+    'transforming',
+    [
+      node('in', 'input', { defaultValue: '{"score": 0.82, "verdict": "keep"}' }),
+      node('score', 'transform', { expression: 'get(input, "score")' }),
+      prompt('draft', 'Score was {{nodes.score.output}}'),
+      node('out', 'output')
+    ],
+    [edge('in', 'score'), edge('score', 'draft'), edge('draft', 'out')]
+  );
+  const h = harness(wf);
+  const ctx = await h.run();
+  assert.equal(ctx.score.output, 0.82, 'the field should arrive as a number, not the JSON around it');
+  assert.equal(h.llm.calls.length, 1, 'a transform must not call a model');
+  assert.equal(h.llm.calls[0].userPrompt, 'Score was 0.82');
+});
+
+test('a transform reads declared variables too', async () => {
+  const wf = workflow(
+    'transforming',
+    [
+      node('in', 'input', { defaultValue: '{"score": 0.82}' }),
+      node('verdict', 'transform', {
+        expression: 'if(get(input, "score") > vars.threshold, "keep", "drop")'
+      }),
+      node('out', 'output')
+    ],
+    [edge('in', 'verdict'), edge('verdict', 'out')]
+  );
+  wf.variables = { threshold: 0.5 };
+  const h = harness(wf);
+  const ctx = await h.run();
+  assert.equal(ctx.verdict.output, 'keep');
+});
+
+test('a transform with no expression carries its input through unchanged', async () => {
+  const wf = workflow(
+    'transforming',
+    [node('in', 'input', { defaultValue: 'straight through' }), node('t', 'transform', {}), node('out', 'output')],
+    [edge('in', 't'), edge('t', 'out')]
+  );
+  const ctx = await harness(wf).run();
+  assert.equal(ctx.t.output, 'straight through');
+});
+
+test('an expression that cannot be evaluated fails the node, under its own error strategy', async () => {
+  const wf = workflow(
+    'transforming',
+    [
+      node('in', 'input', { defaultValue: 'x' }),
+      node('t', 'transform', { expression: 'nosuchthing(input)' }),
+      node('out', 'output')
+    ],
+    [edge('in', 't'), edge('t', 'out')]
+  );
+  await assert.rejects(harness(wf).run(), /nosuchthing/);
+
+  // The same node told to fall back carries the fallback and the run goes on,
+  // exactly as a prompt node does — error strategy is read off the config
+  // whatever the node's type.
+  const wf2 = workflow(
+    'transforming',
+    [
+      node('in', 'input', { defaultValue: 'x' }),
+      node('t', 'transform', {
+        expression: 'nosuchthing(input)',
+        onError: { strategy: 'default', fallbackValue: 'fell back' }
+      }),
+      node('out', 'output')
+    ],
+    [edge('in', 't'), edge('t', 'out')]
+  );
+  const ctx = await harness(wf2).run();
+  assert.equal(ctx.t.output, 'fell back');
+  assert.equal(ctx.out.output, 'fell back');
+});
+
 test('a required input with no value fails the run at that node', async () => {
   const wf = linear();
   wf.nodes[0] = node('in', 'input', { required: true });

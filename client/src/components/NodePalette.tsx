@@ -31,6 +31,13 @@ const nodeTypes: NodeType[] = [
     icon: '↔'
   },
   {
+    type: 'transform',
+    label: 'Transform',
+    description: 'Compute without a model',
+    color: 'bg-cyan-600',
+    icon: 'ƒ'
+  },
+  {
     type: 'aggregate',
     label: 'Aggregate',
     description: 'Combine outputs',

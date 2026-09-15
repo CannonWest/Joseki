@@ -14,6 +14,7 @@ import {
   DEFAULT_GATE_TIMEOUT_SECONDS,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_MAX_REVISIONS,
+  DEFAULT_TRANSFORM_EXPRESSION,
   evaluateCondition,
   MAX_ATTEMPTS,
   promptParams
@@ -518,6 +519,10 @@ export class WorkflowExecutor {
           detail = { condition: (node.data.config as any).condition || 'true', handle: output };
           break;
 
+        case 'transform':
+          output = await this.executeTransformNode(node, inputs, context, options.variables ?? {});
+          break;
+
         case 'aggregate':
           output = await this.executeAggregateNode(node, inputs);
           break;
@@ -685,15 +690,17 @@ export class WorkflowExecutor {
    * arrive that way — a hyphen is subtraction to it, and the canvas hyphenates
    * every id it mints — so `nodes` is the one that always works.
    */
-  private async executeBranchNode(
-    node: WorkflowNode,
+  /**
+   * The names an expression is read against — one definition, because a branch
+   * and a transform are the same language put to two uses, and a scope that
+   * drifted between them would make a condition and the transform beside it
+   * disagree about what `input` means.
+   */
+  private expressionScope(
     inputs: NodeInput[],
     context: ExecutionContext,
     variables: Record<string, unknown>
-  ): Promise<string> {
-    const config = node.data.config as any;
-    const conditionStr: string = config.condition || 'true';
-
+  ): Record<string, unknown> {
     const byNode: Record<string, unknown> = {};
     for (const [nodeId, nodeCtx] of Object.entries(context)) byNode[nodeId] = nodeCtx.output;
 
@@ -713,7 +720,40 @@ export class WorkflowExecutor {
       scope[`${nodeId}_output`] = output;
     }
 
-    const result = evaluateCondition(conditionStr, scope);
+    return scope;
+  }
+
+  /**
+   * Works something out without a model: the branch language, with the answer
+   * kept instead of thrown away. Whatever it computes becomes the node's
+   * output, read downstream as `{{nodes.<id>.output}}` like any other.
+   *
+   * Unlike a branch it puts no constraint on the result — a number, a string,
+   * a parsed object are all answers — so the only failure is an expression
+   * that cannot be evaluated, which `runNode` then handles under the node's
+   * own error strategy like any other failure.
+   */
+  private async executeTransformNode(
+    node: WorkflowNode,
+    inputs: NodeInput[],
+    context: ExecutionContext,
+    variables: Record<string, unknown>
+  ): Promise<unknown> {
+    const config = node.data.config as any;
+    const expression: string = config.expression || DEFAULT_TRANSFORM_EXPRESSION;
+    return evaluateCondition(expression, this.expressionScope(inputs, context, variables));
+  }
+
+  private async executeBranchNode(
+    node: WorkflowNode,
+    inputs: NodeInput[],
+    context: ExecutionContext,
+    variables: Record<string, unknown>
+  ): Promise<string> {
+    const config = node.data.config as any;
+    const conditionStr: string = config.condition || 'true';
+
+    const result = evaluateCondition(conditionStr, this.expressionScope(inputs, context, variables));
 
     // A branch has two arrows, `true` and `false`, and the result names the one
     // that fires. Anything else names an arrow that does not exist, and every

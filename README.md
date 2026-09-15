@@ -5,7 +5,7 @@ A visual IDE for building conversational AI workflows with tree-based branching 
 ## Features
 
 - **Visual Canvas**: Drag-and-drop workflow builder with React Flow
-- **Node Types**: Prompt, Branch, Aggregate, Human Gate
+- **Node Types**: Prompt, Branch, Transform, Aggregate, Human Gate
 - **Real-time Execution**: WebSocket streaming with live token output; nodes that don't depend on each other run at once
 - **Run History**: Every run recorded and reopenable on the canvas, results and all
 - **Folders**: Workflows live in folders, like files; the three shipped examples come in one called Examples
@@ -200,6 +200,25 @@ get(nodes, "prompt-1757.score") > 0.5    an earlier node's field
 Nothing compares as nothing, never as zero: a field that was not there fails `> 0.5` *and* `< 1`, rather than clearing a threshold it never reached. Ask `isEmpty(x)` to test for it on purpose; there is no `null` keyword.
 
 **Validate** reads conditions at edit time — a condition that does not parse, one that reads a name nothing will supply, a branch missing its true or false arrow, and an arrow on a handle a branch can never choose. At run time a condition that decides something other than true or false stops the run and says so, rather than quietly killing every path out of the node.
+
+## Transform
+
+A **Transform** node works something out without asking a model. Its **Expression** is the branch condition language — the same vocabulary, the same four names in scope — with the answer kept rather than turned into an arrow. Whatever it computes becomes the node's output, read downstream the ordinary way as `{{nodes.<id>.output}}`.
+
+It exists because a run kept needing a model for work no model is needed for. A prompt node asked for JSON returns a string, and pulling the score out of it used to take a second prompt — a call, a wait, a cost, and a model's word for what a parser can do exactly:
+
+```
+get(input, "score")                                     a field, through the JSON around it
+words(input)                                            how long the answer was, as a number
+trim(lower(input))                                      fold it before anything downstream reads it
+if(get(input, "score") > vars.threshold, "keep", "drop")  decide without branching
+```
+
+A branch and a transform read the same scope, from one definition in the executor — a condition and the transform beside it can never disagree about what `input` means. The difference is only what happens to the answer: a branch requires true or false and fires an arrow, a transform puts no constraint on the result and carries it.
+
+An expression that cannot be evaluated fails the node, and the node's **On Error** strategy then applies exactly as it does to a prompt — retry, fall back, or stop the run. **Validate** reads the expression at edit time: one that does not parse, one reading a name nothing supplies, one reading a `vars.x` the workflow does not declare.
+
+A transform with no expression carries its input through unchanged.
 
 ## When a node fails
 
