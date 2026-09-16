@@ -153,6 +153,15 @@ nothing is billed.
   looking for the import, which is fine.
 - **`ReactFlowProvider` stays inside `CanvasView`.** Hoisting it above the
   lazy boundary breaks the canvas.
+- **React Flow's two selection keys do different things.**
+  `multiSelectionKeyCode` only makes a *click* toggle a node in and out of the
+  selection; the modifier that starts a drag-selection box is
+  `selectionKeyCode`, and panning is disabled while *that* key is held. Ctrl
+  was bound to the first and not the second, so Ctrl+drag panned the canvas,
+  while a hand-rolled selection box sat in `CanvasView` never firing once —
+  its `event.target === event.currentTarget` test was made against a wrapper
+  the React Flow events never target. Both props take `Control` now, and the
+  built-in box and its group-drag rect do the work.
 - **Schema changes go in `server/src/db/migrations.ts`**, never into a
   `CREATE TABLE` in `database.ts` — see *Schema changes* in the README.
 - **The example workflows are seeded by migration v4, not by `initTables`.**
