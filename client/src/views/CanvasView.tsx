@@ -14,7 +14,6 @@ import ReactFlow, {
   addEdge,
   useNodesState,
   useEdgesState,
-  useReactFlow,
   Connection,
   Edge,
   Node,
@@ -76,14 +75,6 @@ const edgeTypes = {
   routed: RoutedEdge
 };
 
-interface SelectionBox {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  isSelecting: boolean;
-}
-
 // Arrows out of a branch or a gate carry the handle they leave from, so the
 // canvas shows which way is which.
 const HANDLE_COLORS: Record<string, string> = {
@@ -128,14 +119,10 @@ function Flow({
   const [saveTarget, setSaveTarget] = useState<Workflow | null>(null);
   const [showClear, setShowClear] = useState(false);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
-  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   // Where the reviewer pushed the gate panel. Kept here rather than in the
   // panel, which is unmounted and rebuilt every time the run reaches a gate.
   const [gateOffset, setGateOffset] = useState<Offset>(NO_OFFSET);
 
-  const flowWrapper = useRef<HTMLDivElement>(null);
-  const { project } = useReactFlow();
-  
   const { currentWorkflow, setCurrentWorkflow, persistWorkflow, workflows } = useWorkflowStore();
   const {
     isExecuting,
@@ -215,75 +202,6 @@ function Flow({
     // Clear all node selections
     setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
   }, [setNodes]);
-
-  // Handle Ctrl key for selection box state tracking
-
-  // Selection box mouse handlers
-  const handleMouseDown = useCallback((event: React.MouseEvent) => {
-    // Only start selection box on Ctrl+click on the pane (not on nodes)
-    if ((event.ctrlKey || event.metaKey) && event.target === event.currentTarget) {
-      const bounds = flowWrapper.current?.getBoundingClientRect();
-      if (!bounds) return;
-      
-      const x = event.clientX - bounds.left;
-      const y = event.clientY - bounds.top;
-      
-      setSelectionBox({
-        startX: x,
-        startY: y,
-        endX: x,
-        endY: y,
-        isSelecting: true
-      });
-    }
-  }, []);
-
-  const handleMouseMove = useCallback((event: React.MouseEvent) => {
-    if (!selectionBox?.isSelecting) return;
-    
-    const bounds = flowWrapper.current?.getBoundingClientRect();
-    if (!bounds) return;
-    
-    setSelectionBox((prev) => ({
-      ...prev!,
-      endX: event.clientX - bounds.left,
-      endY: event.clientY - bounds.top
-    }));
-  }, [selectionBox?.isSelecting]);
-
-  const handleMouseUp = useCallback(() => {
-    if (!selectionBox?.isSelecting) return;
-
-    // Calculate selection box in flow coordinates
-    const bounds = flowWrapper.current?.getBoundingClientRect();
-    if (!bounds) {
-      setSelectionBox(null);
-      return;
-    }
-
-    const startPos = project({
-      x: Math.min(selectionBox.startX, selectionBox.endX),
-      y: Math.min(selectionBox.startY, selectionBox.endY) - bounds.top + bounds.top
-    });
-    
-    const endPos = project({
-      x: Math.max(selectionBox.startX, selectionBox.endX),
-      y: Math.max(selectionBox.startY, selectionBox.endY) - bounds.top + bounds.top
-    });
-
-    // Select nodes within the box
-    setNodes((nds) => nds.map((node) => {
-      const isInBox = 
-        node.position.x >= startPos.x &&
-        node.position.x <= endPos.x &&
-        node.position.y >= startPos.y &&
-        node.position.y <= endPos.y;
-      
-      return { ...node, selected: isInBox };
-    }));
-
-    setSelectionBox(null);
-  }, [selectionBox, project, setNodes]);
 
   const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
     setSelectedEdge(edge);
@@ -606,13 +524,11 @@ function Flow({
         />
         
         <div className="flex-1 flex overflow-hidden">
-          <div 
-            ref={flowWrapper}
-            className="flex-1 relative"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
+          <div className="flex-1 relative">
+            {/* Ctrl+drag draws a selection box. React Flow calls the drag
+                modifier `selectionKeyCode` (Shift by default) and disables
+                panning while it is held; `multiSelectionKeyCode` only makes a
+                click toggle, so both are Ctrl. */}
             <ReactFlow
               nodes={nodes}
               edges={edges.map(edge => decorateEdge(edge, nodes, selectedEdge?.id === edge.id))}
@@ -624,14 +540,13 @@ function Flow({
               onPaneClick={onPaneClick}
               onDrop={onDrop}
               onDragOver={onDragOver}
-              onMouseDown={handleMouseDown}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               fitView
               snapToGrid
               snapGrid={[15, 15]}
               className="bg-slate-950"
-              selectionOnDrag={true}
+              selectionKeyCode="Control"
               selectionMode={SelectionMode.Partial}
               multiSelectionKeyCode="Control"
             >
@@ -729,19 +644,6 @@ function Flow({
               variables={currentWorkflow?.variables ?? {}}
               onEdit={() => setShowVariables(true)}
             />
-            
-            {/* Selection Box Overlay */}
-            {selectionBox?.isSelecting && (
-              <div
-                className="absolute border-2 border-blue-400 bg-blue-400/10 pointer-events-none z-50"
-                style={{
-                  left: Math.min(selectionBox.startX, selectionBox.endX),
-                  top: Math.min(selectionBox.startY, selectionBox.endY),
-                  width: Math.abs(selectionBox.endX - selectionBox.startX),
-                  height: Math.abs(selectionBox.endY - selectionBox.startY)
-                }}
-              />
-            )}
           </div>
           
           {selectedNode && (
