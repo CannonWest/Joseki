@@ -59,7 +59,7 @@ joseki/
 4. **Validate**: Click **Validate** to check for problems before running
 5. **Execute**: Press `Cmd+Enter` to run the workflow (it is saved and validated first)
 6. **Share**: **Export** downloads the workflow as JSON; **Import** loads one from a file or pasted JSON
-7. **Open**: browse your workflows and folders — open, rename, move and delete them — from the toolbar
+7. **Open Workflows**: browse your workflows and folders — open, rename, move and delete them — from the top of the sidebar. **Save** names the workflow and puts it in the folder you choose; **Clear** empties the canvas into a fresh workflow, leaving anything saved alone
 
 ## Workflow files
 
@@ -115,7 +115,7 @@ Joseki only makes chat completions, so `/api/models` leaves them out rather than
 
 ## Folders
 
-Workflows live in folders, the way files do. **Open** in the editor toolbar is the way in: folders to walk into, workflows to open, a breadcrumb back up, and on each row **Rename**, **Move** and **Delete**, done in the row rather than in a second dialog. **New folder** makes one where you are. **+ New workflow** starts one where you are, and that is the only way a workflow starts anywhere but the top level — the app opens on a fresh workflow in the root, and **Import** also saves to the root.
+Workflows live in folders, the way files do. **Open Workflows** at the top of the sidebar is the way in: folders to walk into, workflows to open, a breadcrumb back up, and on each row **Rename**, **Move** and **Delete**, done in the row rather than in a second dialog. **New folder** makes one where you are. **+ New workflow** starts one where you are — that and **Save** are the ways a workflow starts anywhere but the top level; the app opens on a fresh workflow in the root, and **Import** also saves to the root. **Save** asks for a name and a folder and writes the canvas there; a workflow that lives in Examples is saved as a copy in a folder outside Examples, so the shipped ones stay as they are.
 
 A folder is named by its path — `Examples`, `Clients/Acme` — and the root is the empty path. A folder is a row of its own, so an empty one stays until it is deleted; a workflow names the folder it is in, and a folder a workflow is saved into is made if it is not there yet. A name cannot contain a slash, and two folders in one place cannot differ only by case.
 
@@ -151,7 +151,7 @@ A workflow carries `folder` wherever it goes — `GET`, `PUT`, export. `POST /ap
 
 ## Variables
 
-A workflow can declare values of its own: a target language, a threshold, a tone, a model slug three prompts name. **Variables** in the toolbar is where they are written down — a name, a value, and the type it was read as. A prompt reads one as `{{vars.tone}}`, a branch condition as `vars.threshold`.
+A workflow can declare values of its own: a target language, a threshold, a tone, a model slug three prompts name. **Variables**, the card over the canvas above the minimap, is where they are written down — a name, a value, and the type it was read as. A prompt reads one as `{{vars.tone}}`, a branch condition as `vars.threshold`.
 
 They are **single-assignment**: declared before the run and constant through it, and no node writes one. That is the whole design, not a missing feature. The executor runs every ready node at once — Best of Four starts four prompts within 14 ms of each other — so a value a node could reassign would be read differently depending on which sibling happened to finish first, and two runs of one workflow would stop meaning the same thing. What a node produces already has a name: `{{nodes.<id>.output}}`.
 
