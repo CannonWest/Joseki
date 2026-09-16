@@ -7,7 +7,8 @@ import {
   describeFolder,
   describeWorkflow,
   missingExamples,
-  moveTargets
+  moveTargets,
+  saveTargets
 } from '../src/workflows/browse';
 
 test('a workflow row says how big it is and how often it has run', () => {
@@ -79,4 +80,23 @@ test('the examples missing from the library are the ones Restore would bring bac
   assert.deepEqual(missingExamples(SHIPPED_EXAMPLE_IDS.map((id) => ({ id }))), []);
   const [first, ...rest] = SHIPPED_EXAMPLE_IDS;
   assert.deepEqual(missingExamples([{ id: first }, { id: 'mine' }]), rest);
+});
+
+test('save targets are the root and the folders outside Examples, indented by depth', () => {
+  const folders = [
+    { path: 'Examples', createdAt: 1 },
+    { path: 'Examples/Drafts', createdAt: 1 },
+    { path: 'Clients/Acme', createdAt: 1 },
+    { path: 'Clients', createdAt: 1 }
+  ];
+  const targets = saveTargets(folders);
+
+  assert.deepEqual(
+    targets.map((t) => [t.path, t.name, t.depth]),
+    [
+      ['', 'Top level', 0],
+      ['Clients', 'Clients', 1],
+      ['Clients/Acme', 'Acme', 2]
+    ]
+  );
 });

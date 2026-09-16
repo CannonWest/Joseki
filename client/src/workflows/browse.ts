@@ -1,5 +1,12 @@
 import type { Folder, FolderEntry, WorkflowSummary } from '@joseki/shared';
-import { ROOT_FOLDER, SHIPPED_EXAMPLE_IDS, folderName, folderSegments, isWithinFolder } from '@joseki/shared';
+import {
+  EXAMPLES_FOLDER,
+  ROOT_FOLDER,
+  SHIPPED_EXAMPLE_IDS,
+  folderName,
+  folderSegments,
+  isWithinFolder
+} from '@joseki/shared';
 
 /**
  * What the Open dialog says about the things it lists. Pure, so the words a
@@ -73,4 +80,27 @@ export function moveTargets(
 export function missingExamples(workflows: Array<{ id: string }>): string[] {
   const present = new Set(workflows.map((workflow) => workflow.id));
   return SHIPPED_EXAMPLE_IDS.filter((id) => !present.has(id));
+}
+
+/** A place a workflow being saved may go. */
+export interface SaveTarget {
+  path: string;
+  name: string;
+  /** How far in to indent it: the root is 0. */
+  depth: number;
+}
+
+/**
+ * Where a workflow being saved may go: the root, then every folder outside
+ * Examples, indented by depth. Examples is refused rather than listed — it
+ * holds what Joseki ships, and Save is for the workflows you keep.
+ */
+export function saveTargets(folders: Folder[]): SaveTarget[] {
+  return [ROOT_FOLDER, ...folders.map((folder) => folder.path).sort()]
+    .filter((path) => !isWithinFolder(path, EXAMPLES_FOLDER))
+    .map((path) => ({
+      path,
+      name: path === ROOT_FOLDER ? 'Top level' : folderName(path),
+      depth: folderSegments(path).length
+    }));
 }

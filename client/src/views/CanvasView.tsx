@@ -37,7 +37,10 @@ import { Toolbar } from '../components/Toolbar';
 import { ValidationPanel } from '../components/ValidationPanel';
 import { ImportModal } from '../components/ImportModal';
 import { VariablesModal } from '../components/VariablesModal';
+import { VariablesPanel } from '../components/VariablesPanel';
 import { OpenWorkflowDialog } from '../components/OpenWorkflowDialog';
+import { SaveWorkflowModal } from '../components/SaveWorkflowModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { GateDecisionPanel } from '../components/GateDecisionPanel';
 import { RunInputsModal, type RunInput } from '../components/RunInputsModal';
 import { NO_OFFSET, type Offset } from '../hooks/usePointerDrag';
@@ -122,6 +125,8 @@ function Flow({
   const [showImport, setShowImport] = useState(false);
   const [showVariables, setShowVariables] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
+  const [saveTarget, setSaveTarget] = useState<Workflow | null>(null);
+  const [showClear, setShowClear] = useState(false);
   const [runInputs, setRunInputs] = useState<{ workflow: Workflow; inputs: RunInput[] } | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   // Where the reviewer pushed the gate panel. Kept here rather than in the
@@ -452,6 +457,25 @@ function Flow({
     setCurrentWorkflow(blankWorkflow(folder));
   }, [leaveCanvas, clearExecution, setCurrentWorkflow]);
 
+  // Save asks for a name and a folder first. What comes back carries the
+  // identity the next save should use — a copy of an example has an id of
+  // its own.
+  const handleSave = useCallback(() => {
+    const workflow = canvasWorkflow();
+    if (workflow) setSaveTarget(workflow);
+  }, [canvasWorkflow]);
+
+  // Clear empties the canvas into a fresh workflow. Nothing stored is
+  // deleted; the dialog is where that is said.
+  const clearCanvas = useCallback(() => {
+    setShowClear(false);
+    clearExecution();
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    setValidation(null);
+    setCurrentWorkflow(blankWorkflow(ROOT_FOLDER));
+  }, [clearExecution, setCurrentWorkflow]);
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -558,7 +582,12 @@ function Flow({
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      <NodePalette />
+      <NodePalette
+        onOpen={() => setShowOpen(true)}
+        onSave={handleSave}
+        onClear={() => setShowClear(true)}
+        canClear={!isExecuting}
+      />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         <Toolbar
@@ -571,12 +600,9 @@ function Flow({
           onToggleRuns={() => setShowRuns(!showRuns)}
           showRuns={showRuns}
           onOpenChat={handleOpenChat}
-          onOpen={() => setShowOpen(true)}
           onValidate={handleValidate}
           onExport={handleExport}
           onImport={() => setShowImport(true)}
-          onVariables={() => setShowVariables(true)}
-          variableCount={Object.keys(currentWorkflow?.variables ?? {}).length}
         />
         
         <div className="flex-1 flex overflow-hidden">
@@ -698,6 +724,11 @@ function Flow({
                 </Panel>
               )}
             </ReactFlow>
+
+            <VariablesPanel
+              variables={currentWorkflow?.variables ?? {}}
+              onEdit={() => setShowVariables(true)}
+            />
             
             {/* Selection Box Overlay */}
             {selectionBox?.isSelecting && (
@@ -769,6 +800,25 @@ function Flow({
           onClose={() => setShowOpen(false)}
           onOpen={(workflow) => void handleOpenWorkflow(workflow)}
           onNew={(folder) => void handleNewWorkflow(folder)}
+        />
+      )}
+      {saveTarget && (
+        <SaveWorkflowModal
+          workflow={saveTarget}
+          onClose={() => setSaveTarget(null)}
+          onSaved={(saved) => {
+            setSaveTarget(null);
+            setCurrentWorkflow(saved);
+          }}
+        />
+      )}
+      {showClear && (
+        <ConfirmModal
+          title="Clear the canvas?"
+          body="Every node and connection goes, and the variables with them. The canvas becomes a new, unsaved workflow at the top level. Anything already saved stays in the workflow list — nothing there is deleted."
+          confirmLabel="Clear canvas"
+          onConfirm={clearCanvas}
+          onClose={() => setShowClear(false)}
         />
       )}
       {runInputs && (

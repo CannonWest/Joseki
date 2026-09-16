@@ -29,12 +29,14 @@ function parseValue(text: string): unknown {
   }
 }
 
-function valueText(value: unknown): string {
+/** The text a value is edited and shown as: strings as themselves, the rest as JSON. */
+export function valueText(value: unknown): string {
   if (typeof value === 'string') return value;
   return JSON.stringify(value) ?? '';
 }
 
-function typeLabel(value: unknown): string {
+/** The type a value was read as — what the badge beside a row says. */
+export function typeLabel(value: unknown): string {
   if (Array.isArray(value)) return 'list';
   if (value === null) return 'null';
   return typeof value;
