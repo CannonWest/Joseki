@@ -11,6 +11,7 @@ interface NodeExecutionState {
   status: ExecutionStatus;
   trace?: ExecutionTrace;
   streamingContent?: string;
+  streamingReasoning?: string;
 }
 
 interface ExecutionState {
@@ -38,6 +39,7 @@ interface ExecutionState {
   endExecution: (outcome?: 'success' | 'error') => void;
   setNodeStatus: (nodeId: string, status: ExecutionStatus, trace?: ExecutionTrace) => void;
   appendStreamToken: (nodeId: string, token: string) => void;
+  appendStreamReasoning: (nodeId: string, token: string) => void;
   setPendingGate: (gate: ExecutionPausedEvent | null) => void;
   addLog: (message: string, type: 'info' | 'error' | 'success') => void;
   loadRun: (run: ExecutionDetail) => void;
@@ -54,7 +56,12 @@ export function nodeStatesFromTraces(
 ): Map<string, NodeExecutionState> {
   const states = new Map<string, NodeExecutionState>();
   for (const trace of traces) {
-    states.set(trace.nodeId, { status: trace.status, trace, streamingContent: '' });
+    states.set(trace.nodeId, {
+      status: trace.status,
+      trace,
+      streamingContent: '',
+      streamingReasoning: trace.reasoning || ''
+    });
   }
   return states;
 }
@@ -146,7 +153,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       newStates.set(nodeId, {
         status,
         trace,
-        streamingContent: status === 'running' ? '' : existing?.streamingContent || ''
+        streamingContent: status === 'running' ? '' : existing?.streamingContent || '',
+        streamingReasoning: status === 'running' ? '' : existing?.streamingReasoning || ''
       });
 
       return { nodeStates: newStates };
@@ -161,6 +169,23 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       newStates.set(nodeId, {
         status: 'running',
         streamingContent: (existing?.streamingContent || '') + token,
+        streamingReasoning: existing?.streamingReasoning,
+        trace: existing?.trace
+      });
+
+      return { nodeStates: newStates };
+    });
+  },
+
+  appendStreamReasoning: (nodeId, token) => {
+    set((state) => {
+      const newStates = new Map(state.nodeStates);
+      const existing = newStates.get(nodeId);
+
+      newStates.set(nodeId, {
+        status: 'running',
+        streamingReasoning: (existing?.streamingReasoning || '') + token,
+        streamingContent: existing?.streamingContent,
         trace: existing?.trace
       });
 

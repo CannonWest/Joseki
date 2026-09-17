@@ -80,6 +80,9 @@ export function setupSocketHandlers(io: Server, db: Database) {
           onStreamToken: (nodeId, token) => {
             socket.emit('execution:token', { executionId, nodeId, token });
           },
+          onStreamReasoning: (nodeId, token) => {
+            socket.emit('execution:reasoning', { executionId, nodeId, token });
+          },
           onPaused: (event) => {
             db.updateExecutionStatus(executionId, 'paused');
             socket.emit('execution:paused', event);

@@ -13,6 +13,7 @@ export interface GenerationParams {
    */
   params: ChatParams;
   onToken?: (token: string) => void;
+  onReasoning?: (token: string) => void;
 }
 
 export interface GenerationResult {
@@ -25,6 +26,8 @@ export interface GenerationResult {
   model: string;
   /** USD as the gateway reports it, when it does. */
   cost?: number;
+  /** The model's thinking trace, when it reasoned and the gateway reported it. */
+  reasoning?: string;
 }
 
 /** The one call a prompt node makes. */
@@ -72,6 +75,7 @@ export class OpenRouterGenerator implements Generator {
 
     for await (const event of this.provider.chatStream(request)) {
       if (event.type === 'token') params.onToken(event.text);
+      if (event.type === 'reasoning') params.onReasoning?.(event.text);
       if (event.type === 'done') return fromChatResult(event.result);
     }
     throw new Error(`The stream from ${params.model} ended without a result`);
@@ -96,5 +100,6 @@ function fromChatResult(result: ChatResult): GenerationResult {
     model: result.model
   };
   if (typeof result.cost === 'number') out.cost = result.cost;
+  if (result.reasoning) out.reasoning = result.reasoning;
   return out;
 }

@@ -88,6 +88,7 @@ export interface ExecutionOptions {
   onNodeStart?: (nodeId: string) => void;
   onNodeComplete?: (nodeId: string, trace: ExecutionTrace) => void;
   onStreamToken?: (nodeId: string, token: string) => void;
+  onStreamReasoning?: (nodeId: string, token: string) => void;
   /** The run stopped at a human gate and is waiting. */
   onPaused?: (event: ExecutionPausedEvent) => void;
 }
@@ -494,6 +495,7 @@ export class WorkflowExecutor {
       let selectedHandle: string | undefined;
       let decision: GateDecision | undefined;
       let detail: TraceDetail | undefined;
+      let reasoning: string | undefined;
 
       switch (node.type) {
         case 'prompt': {
@@ -502,12 +504,14 @@ export class WorkflowExecutor {
             inputs,
             context,
             options.variables ?? {},
-            options.onStreamToken
+            options.onStreamToken,
+            options.onStreamReasoning
           );
           output = promptResult.output;
           tokenUsage = promptResult.tokenUsage;
           model = promptResult.model;
           reportedCost = promptResult.cost;
+          reasoning = promptResult.reasoning;
           break;
         }
 
@@ -570,7 +574,8 @@ export class WorkflowExecutor {
           latencyMs,
           status: 'success',
           model,
-          detail
+          detail,
+          reasoning
         },
         selectedHandle,
         decision
@@ -615,8 +620,9 @@ export class WorkflowExecutor {
     inputs: NodeInput[],
     context: ExecutionContext,
     variables: Record<string, unknown>,
-    onStreamToken?: (nodeId: string, token: string) => void
-  ): Promise<{ output: string; tokenUsage: any; model: string; cost?: number }> {
+    onStreamToken?: (nodeId: string, token: string) => void,
+    onStreamReasoning?: (nodeId: string, token: string) => void
+  ): Promise<{ output: string; tokenUsage: any; model: string; cost?: number; reasoning?: string }> {
     const config = node.data.config as any;
 
     // Compile templates with context
@@ -632,14 +638,16 @@ export class WorkflowExecutor {
       systemPrompt,
       userPrompt,
       params: promptParams(config),
-      onToken: onStreamToken ? (token) => onStreamToken(node.id, token) : undefined
+      onToken: onStreamToken ? (token) => onStreamToken(node.id, token) : undefined,
+      onReasoning: onStreamReasoning ? (token) => onStreamReasoning(node.id, token) : undefined
     });
 
     return {
       output: result.content,
       tokenUsage: result.tokenUsage,
       model: config.model,
-      cost: result.cost
+      cost: result.cost,
+      reasoning: result.reasoning
     };
   }
 

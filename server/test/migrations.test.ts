@@ -220,7 +220,7 @@ test('v5 drops the tables nothing reads, and a fresh database is never built the
   older.close();
 
   const db = new Database(file);
-  assert.deepEqual(db.schema.applied.map((m) => m.version), [5]);
+  assert.deepEqual(db.schema.applied.map((m) => m.version), [5, 6]);
   db.close();
   const left = tablesIn(file).filter((t) => t === 'model_configs' || t === 'conversation_trees');
   assert.deepEqual(left, [], 'both tables are gone');
@@ -233,6 +233,50 @@ test('v5 drops the tables nothing reads, and a fresh database is never built the
   assert.ok(!tables.includes('model_configs'), 'not built only to be dropped');
   assert.ok(!tables.includes('conversation_trees'));
   cleanupFresh();
+
+  cleanup();
+});
+
+test('a run recorded before v6 still reads, with reasoning empty', () => {
+  const { file, cleanup } = tempDb('pre-v6.db');
+
+  // The traces table as it stood before v6, holding a prompt node's run.
+  const older = new BetterSqlite3(file);
+  older.exec(`
+    CREATE TABLE execution_traces (
+      id TEXT PRIMARY KEY, execution_id TEXT NOT NULL, node_id TEXT NOT NULL,
+      input TEXT NOT NULL, output TEXT NOT NULL, token_usage TEXT, cost REAL,
+      latency_ms INTEGER, status TEXT NOT NULL, error TEXT, timestamp INTEGER NOT NULL,
+      detail TEXT, model TEXT
+    );
+    INSERT INTO execution_traces
+      (id, execution_id, node_id, input, output, token_usage, cost, latency_ms, status, timestamp, model)
+      VALUES ('t1', 'run-old', 'classify', '"hi"', '"ok"', '{}', 0, 0, 'success', 1, 'openai/gpt-oss-20b');
+  `);
+  older.close();
+
+  const db = new Database(file);
+  assert.equal(db.schema.to, LATEST_VERSION);
+
+  const [trace] = db.getExecutionTraces('run-old');
+  assert.equal(trace.output, 'ok', 'what it recorded is untouched');
+  // Missing rather than wrong: the run happened before the column existed.
+  assert.equal(trace.reasoning, undefined);
+  db.close();
+
+  cleanup();
+});
+
+test('v6 gives the traces table somewhere to put a prompt node\'s reasoning', () => {
+  const { file, cleanup } = tempDb('v6.db');
+  new Database(file).close();
+
+  const inspect = new BetterSqlite3(file, { readonly: true });
+  const columns = (inspect.prepare('PRAGMA table_info(execution_traces)').all() as Array<{ name: string }>)
+    .map((column) => column.name);
+  inspect.close();
+
+  assert.ok(columns.includes('reasoning'));
 
   cleanup();
 });

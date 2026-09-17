@@ -145,6 +145,17 @@ export const migrations: Migration[] = [
       db.exec('DROP TABLE IF EXISTS model_configs');
       db.exec('DROP TABLE IF EXISTS conversation_trees');
     }
+  },
+  {
+    version: 6,
+    name: 'execution_traces: a prompt node\'s thinking trace',
+    up(db) {
+      // Chat has carried this since messages grew reasoning_details (v1); a
+      // workflow's prompt nodes call the same gateway and can reason too, but
+      // had nowhere to keep it. Traces recorded before this stay null — that
+      // is missing, not wrong, the same as an old trace's model.
+      addColumn(db, 'execution_traces', 'reasoning', 'TEXT');
+    }
   }
 ];
 

@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { useExecutionStore } from '../stores/executionStore';
 import { useResizableWidth } from '../hooks/useResizableWidth';
+import { Reasoning } from './chat/MessageBubble';
 
 interface ExecutionLogPanelProps {
   onClose: () => void;
@@ -75,9 +76,12 @@ export function ExecutionLogPanel({ onClose }: ExecutionLogPanelProps) {
 
         {/* Streaming outputs */}
         {Array.from(nodeStates.entries()).map(([nodeId, state]) => (
-          state.streamingContent && (
+          (state.streamingContent || state.streamingReasoning) && (
             <div key={nodeId} className="bg-blue-900/20 border border-blue-800/50 rounded p-3">
               <div className="text-xs text-blue-400 mb-1">Node {nodeId} (streaming)</div>
+              {state.streamingReasoning && (
+                <Reasoning text={state.streamingReasoning} live={state.status === 'running'} />
+              )}
               <div className="text-sm text-slate-200 whitespace-pre-wrap">
                 {state.streamingContent}
               </div>

@@ -10,6 +10,7 @@ export function useSocket() {
   const {
     setNodeStatus,
     appendStreamToken,
+    appendStreamReasoning,
     setPendingGate,
     addLog,
     endExecution
@@ -51,6 +52,10 @@ export function useSocket() {
       appendStreamToken(data.nodeId, data.token);
     });
 
+    socket.on('execution:reasoning', (data) => {
+      appendStreamReasoning(data.nodeId, data.token);
+    });
+
     socket.on('execution:paused', (event: ExecutionPausedEvent) => {
       setNodeStatus(event.nodeId, 'paused');
       setPendingGate(event);
@@ -81,7 +86,7 @@ export function useSocket() {
     return () => {
       socket.disconnect();
     };
-  }, [setNodeStatus, appendStreamToken, setPendingGate, addLog, endExecution]);
+  }, [setNodeStatus, appendStreamToken, appendStreamReasoning, setPendingGate, addLog, endExecution]);
 
   const subscribeToWorkflow = useCallback((workflowId: string) => {
     socketRef.current?.emit('subscribe:workflow', workflowId);

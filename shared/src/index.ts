@@ -286,6 +286,8 @@ export interface ExecutionTrace {
   model?: string;
   /** Why the node went the way it did. Absent on a node with nothing to decide. */
   detail?: TraceDetail;
+  /** A prompt node's thinking trace, when its model reasoned and the gateway reported it. */
+  reasoning?: string;
 }
 
 export interface ExecutionContext {
@@ -341,8 +343,9 @@ export interface ExecutionDetail extends ExecutionSummary {
 // Client → server: `execution:start`, `execution:resume`
 // (ExecutionResumeRequest), `execution:cancel` (executionId).
 // Server → the starting socket: `execution:nodeStart`, `execution:token`,
-// `execution:nodeComplete`, `execution:paused` (ExecutionPausedEvent),
-// `execution:resumed`, `execution:complete`, `execution:error`.
+// `execution:reasoning`, `execution:nodeComplete`, `execution:paused`
+// (ExecutionPausedEvent), `execution:resumed`, `execution:complete`,
+// `execution:error`.
 
 /** The run stopped at a human gate and is waiting for a decision. */
 export interface ExecutionPausedEvent {
