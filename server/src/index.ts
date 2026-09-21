@@ -15,22 +15,27 @@ import { setupChatHandlers } from './handlers/chat';
 import { OpenRouterProvider, DEFAULT_CHAT_MODEL } from './providers/openrouter';
 import { ChatService } from './chat/service';
 import { createDefaultRegistry } from './tools/builtins';
+import { allowedOrigin } from './origin';
 
 const app = express();
 const httpServer = createServer(app);
-// Dev runs the client on its own Vite origin (CLIENT_URL, default 5173)
-// against this server, so the socket needs an explicit cross-origin allow.
-// Production serves the built client from this same origin (see the static
-// block below), so NODE_ENV is checked first — `.env`'s CLIENT_URL is a
-// dev-time value that stays set in production too, and would otherwise
-// always win over the production case through a plain `||` fallback.
-// `true` reflects the request's own origin, which is what "no cross-origin
-// case left" means here, rather than a second hardcoded origin to keep in
-// sync.
+const production = process.env.NODE_ENV === 'production';
+
+// The pages allowed to talk to this server besides its own. Dev runs the
+// client on its own Vite origin (CLIENT_URL, default 5173) against this
+// server, so that one origin is let in. Production serves the built client
+// from this same origin (see the static block below) and has no other page
+// to let in — NODE_ENV is checked first because `.env`'s CLIENT_URL is a
+// dev-time value that stays set in production too.
+const otherOrigins = production ? [] : [process.env.CLIENT_URL || 'http://localhost:5173'];
+
+// CORS only says what a page may read; a WebSocket handshake ignores it, so
+// the socket checks the origin itself — see allowedOrigin. Production used
+// to reflect any origin here, which let any page open a socket and start runs.
 const io = new Server(httpServer, {
-  cors: {
-    origin: process.env.NODE_ENV === 'production' ? true : (process.env.CLIENT_URL || 'http://localhost:5173'),
-    methods: ['GET', 'POST']
+  cors: production ? undefined : { origin: otherOrigins, methods: ['GET', 'POST'] },
+  allowRequest: (req, callback) => {
+    callback(null, allowedOrigin(req.headers.origin, req.headers.host, otherOrigins));
   }
 });
 
@@ -49,8 +54,10 @@ const chat = new ChatService(db, openRouter, {
   tools: createDefaultRegistry()
 });
 
-// Middleware
-app.use(cors());
+// Middleware. The client reaches /api through the Vite proxy in development
+// and from its own origin in production, so no other page needs to read the
+// API; `cors()` with no options told every page it could.
+app.use(cors({ origin: otherOrigins }));
 app.use(express.json());
 
 // Attach database to requests
@@ -91,9 +98,15 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
-  console.log(`Joseki server running on port ${PORT}`);
+// Loopback unless told otherwise. Everything that talks to this process — the
+// Vite dev proxy, a tunnel, a health probe — runs on the same machine, and the
+// API has no authentication of its own: listening on every interface hands
+// all of it, the model key's spending included, to anyone on the local
+// network. HOST=0.0.0.0 opts back in, for a container or a trusted LAN.
+const PORT = Number(process.env.PORT) || 3001;
+const HOST = process.env.HOST || '127.0.0.1';
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Joseki server running on http://${HOST}:${PORT}`);
 });
 
 export { db, io };

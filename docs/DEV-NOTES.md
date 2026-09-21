@@ -63,8 +63,10 @@ Both variables, not one. `JOSEKI_SERVER_URL` is where the dev server proxies
 `/api`; the socket does not go through the proxy — `useSocket` and
 `useChatSocket` connect to `VITE_WS_URL`, and its default is `ws://localhost:3001`.
 Leave it unset and the scratch client shows **Disconnected**, because the
-other session's server refuses the unexpected origin — or worse, accepts it,
-and every run the scratch client starts executes over there.
+other session's server refuses a socket from any origin but its own and its
+`CLIENT_URL`. (It used to accept the socket, since CORS never governed the
+WebSocket handshake — and every run the scratch client started executed over
+there.)
 
 Copy the database *before* touching `migrations.ts`, not after. The other
 session's `tsx watch` restarts on the save and migrates whatever database it
