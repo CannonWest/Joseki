@@ -359,7 +359,8 @@ The server and the client read **different files**, and neither reads a `.env` a
 | `OPENROUTER_DEFAULT_MODEL` | `server/.env` | Model for new conversations (default: `openai/gpt-4o-mini`) |
 | `DATABASE_PATH` | `server/.env` | SQLite database path. Relative paths resolve against `server/` (default: `./data/joseki.db`) |
 | `PORT` | `server/.env` | Server port (default: 3001) |
-| `CLIENT_URL` | `server/.env` | Frontend origin for CORS (default: `http://localhost:5173`) |
+| `HOST` | `server/.env` | Address the server listens on (default: `127.0.0.1`). The API has no authentication of its own, so it is not on the network unless you put it there: `0.0.0.0` for a container or a network you trust, and a tunnel or an authenticating proxy in front of anything wider |
+| `CLIENT_URL` | `server/.env` | The Vite client's origin in development — the one page besides the server's own allowed to open the socket or read the API (default: `http://localhost:5173`). Ignored in production, where the client is served from the server's own origin |
 | `VITE_WS_URL` | `client/.env` | Socket.io origin, if not the default `ws://localhost:3001` |
 
 ## Schema changes
